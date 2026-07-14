@@ -1,6 +1,7 @@
 import { Context, Effect, Fiber, FiberMap, Layer, Schema, Semaphore } from "effect";
 
 import { SubagentId } from "./SubagentId.ts";
+import { spawnSubagentProcess } from "./SubagentProcess.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export class SubagentAlreadyStartedError extends Schema.TaggedErrorClass<SubagentAlreadyStartedError>()(
@@ -16,7 +17,7 @@ const make = Effect.gen(function* () {
 
   const start = Effect.fn("SubagentSupervisor.start")(function* (
     subagentId: SubagentId,
-    _spec: SubagentSpec,
+    spec: SubagentSpec,
   ) {
     yield* Effect.annotateCurrentSpan({ subagentId });
 
@@ -27,9 +28,7 @@ const make = Effect.gen(function* () {
     const fiber = yield* FiberMap.run(
       children,
       subagentId,
-      // oxlint-disable-next-line no-warning-comments
-      // TODO: Replace with SubagentProcess.
-      Effect.never.pipe(
+      Effect.flatMap(spawnSubagentProcess(subagentId, spec), (process) => process.await).pipe(
         Effect.withSpan("SubagentSupervisor.child", {
           attributes: { subagentId },
         }),
