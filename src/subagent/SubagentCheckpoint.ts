@@ -1,11 +1,12 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 
 import { SubagentId } from "./SubagentId.ts";
+import { SubagentSpec } from "./SubagentSpec.ts";
 
 export const SubagentRecord = Schema.Struct({
   subagentId: SubagentId,
   status: Schema.Literal("queued"),
-  title: Schema.String.check(Schema.isPattern(/\S/)),
+  ...SubagentSpec.fields,
 });
 
 export type SubagentRecord = typeof SubagentRecord.Type;

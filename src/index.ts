@@ -1,12 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { Type } from "typebox";
 
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
+import { SubagentPool } from "./subagent/SubagentPool.ts";
 
 export default function extension(pi: ExtensionAPI): void {
-  const runtime = ManagedRuntime.make(SubagentCheckpoint.layer);
+  const runtime = ManagedRuntime.make(Layer.merge(SubagentCheckpoint.layer, SubagentPool.layer));
 
   pi.on("session_shutdown", () => runtime.dispose());
 
@@ -29,8 +30,11 @@ export default function extension(pi: ExtensionAPI): void {
         Effect.gen(function* () {
           const subagentId = yield* generateSubagentId(title);
           const checkpoint = yield* SubagentCheckpoint;
+          const pool = yield* SubagentPool;
+          const spec = { title };
 
-          yield* checkpoint.put({ subagentId, status: "queued", title });
+          yield* checkpoint.put({ subagentId, status: "queued", ...spec });
+          yield* pool.submit(subagentId, spec);
 
           return {
             content: [{ type: "text" as const, text: subagentId }],
