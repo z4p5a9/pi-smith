@@ -3,6 +3,7 @@ import { Effect, Fiber, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 
 import { decodeSubagentId } from "./SubagentId.ts";
+import { SubagentRegistry } from "./SubagentRegistry.ts";
 import { SubagentAlreadyStartedError, SubagentSupervisor } from "./SubagentSupervisor.ts";
 
 it.describe("SubagentSupervisor", () => {
@@ -33,6 +34,18 @@ it.describe("SubagentSupervisor", () => {
 
       expect(results.filter((result) => result === "started")).toHaveLength(1);
       expect(results.filter(Schema.is(SubagentAlreadyStartedError))).toHaveLength(1);
+    }).pipe(Effect.provide(SubagentSupervisor.layer)),
+  );
+
+  it.effect("registers a started child", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* SubagentSupervisor;
+      const registry = yield* SubagentRegistry;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+
+      yield* supervisor.start(subagentId, { title: "Review API" });
+
+      expect(yield* registry.get(subagentId)).toBeDefined();
     }).pipe(Effect.provide(SubagentSupervisor.layer)),
   );
 });
