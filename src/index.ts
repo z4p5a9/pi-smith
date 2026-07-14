@@ -25,7 +25,7 @@ export default function extension(pi: ExtensionAPI): void {
       },
       { additionalProperties: false },
     ),
-    execute(_toolCallId, { title }) {
+    execute(toolCallId, { title }) {
       return runtime.runPromise(
         Effect.gen(function* () {
           const subagentId = yield* generateSubagentId(title);
@@ -40,7 +40,11 @@ export default function extension(pi: ExtensionAPI): void {
             content: [{ type: "text" as const, text: subagentId }],
             details: { subagentId },
           };
-        }),
+        }).pipe(
+          Effect.withSpan("subagent", {
+            attributes: { toolCallId },
+          }),
+        ),
       );
     },
   });

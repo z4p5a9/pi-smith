@@ -1,6 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
-import { TestClock } from "effect/testing";
+import { Effect, Stream } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
@@ -15,6 +14,13 @@ it.describe("SubagentPool", () => {
 
       yield* checkpoint.put({ subagentId, status: "queued", title: "Review API" });
       yield* pool.submit(subagentId, { title: "Review API" });
+
+      const record = yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((currentRecord) => currentRecord.status === "running"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+      expect(record.status).toBe("running");
     }).pipe(Effect.provide(SubagentPool.layer)),
   );
 
@@ -36,21 +42,53 @@ it.describe("SubagentPool", () => {
       });
       yield* pool.submit(probeSubagentId, { title: "Probe" });
 
-      const assertion = yield* Effect.gen(function* () {
-        let record = yield* checkpoint.get(probeSubagentId);
+      const record = yield* checkpoint.changes(probeSubagentId).pipe(
+        Stream.filter((currentRecord) => currentRecord.status === "running"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+      expect(record.status).toBe("running");
+    }).pipe(Effect.provide(SubagentPool.layer)),
+  );
 
-        while (record.status !== "starting") {
-          yield* Effect.sleep("1 millis");
-          record = yield* checkpoint.get(probeSubagentId);
-        }
+  it.effect("continues consuming after a duplicate supervisor start", () =>
+    Effect.gen(function* () {
+      const pool = yield* SubagentPool;
+      const checkpoint = yield* SubagentCheckpoint;
+      const duplicateSubagentId = yield* decodeSubagentId("sa_12345678_duplicate");
+      const probeSubagentId = yield* decodeSubagentId("sa_87654321_probe");
 
-        return record;
-      }).pipe(Effect.timeout("1 second"), Effect.forkChild);
+      yield* checkpoint.put({
+        subagentId: duplicateSubagentId,
+        status: "queued",
+        title: "Duplicate",
+      });
+      yield* pool.submit(duplicateSubagentId, { title: "Duplicate" });
 
-      yield* TestClock.adjust("1 second");
+      yield* checkpoint.changes(duplicateSubagentId).pipe(
+        Stream.filter((record) => record.status === "running"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+        Effect.asVoid,
+      );
 
-      const record = yield* Fiber.join(assertion);
-      expect(record.status).toBe("starting");
+      for (let index = 0; index < 10; index++) {
+        yield* pool.submit(duplicateSubagentId, { title: "Duplicate" });
+      }
+
+      yield* checkpoint.put({
+        subagentId: probeSubagentId,
+        status: "queued",
+        title: "Probe",
+      });
+      yield* pool.submit(probeSubagentId, { title: "Probe" });
+
+      const record = yield* checkpoint.changes(probeSubagentId).pipe(
+        Stream.filter((currentRecord) => currentRecord.status === "running"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+      expect(record.status).toBe("running");
     }).pipe(Effect.provide(SubagentPool.layer)),
   );
 });

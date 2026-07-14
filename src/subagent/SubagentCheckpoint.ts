@@ -1,11 +1,11 @@
-import { Context, Effect, Layer, Ref, Schema } from "effect";
+import { Context, Effect, Layer, Schema, Stream, SubscriptionRef } from "effect";
 
 import { SubagentId } from "./SubagentId.ts";
 import { SubagentSpec } from "./SubagentSpec.ts";
 
 export const SubagentRecord = Schema.Struct({
   subagentId: SubagentId,
-  status: Schema.Literals(["queued", "starting"]),
+  status: Schema.Literals(["queued", "starting", "running"]),
   ...SubagentSpec.fields,
 });
 
@@ -26,53 +26,41 @@ export class SubagentNotFoundError extends Schema.TaggedErrorClass<SubagentNotFo
 ) {}
 
 const make = Effect.gen(function* () {
-  const records = yield* Ref.make(new Map<SubagentId, SubagentRecord>());
+  const records = yield* SubscriptionRef.make(new Map<SubagentId, SubagentRecord>());
 
   const put = Effect.fn("SubagentCheckpoint.put")(function* (record: SubagentRecord) {
-    const inserted = yield* Ref.modify(records, (currentRecords) => {
+    yield* SubscriptionRef.modifyEffect(records, (currentRecords) => {
       if (currentRecords.has(record.subagentId)) {
-        return [false, currentRecords];
+        return SubagentAlreadyExistsError.make({ subagentId: record.subagentId });
       }
 
       const updatedRecords = new Map(currentRecords);
       updatedRecords.set(record.subagentId, record);
 
-      return [true, updatedRecords];
+      return Effect.succeed([undefined, updatedRecords] as const);
     });
-
-    if (!inserted) {
-      return yield* SubagentAlreadyExistsError.make({ subagentId: record.subagentId });
-    }
-
-    return yield* Effect.void;
   });
 
   const update = Effect.fn("SubagentCheckpoint.update")(function* (
     subagentId: SubagentId,
     fields: Partial<Omit<SubagentRecord, "subagentId">>,
   ) {
-    const updated = yield* Ref.modify(records, (currentRecords) => {
+    yield* SubscriptionRef.modifyEffect(records, (currentRecords) => {
       const record = currentRecords.get(subagentId);
 
       if (record === undefined) {
-        return [false, currentRecords];
+        return SubagentNotFoundError.make({ subagentId });
       }
 
       const updatedRecords = new Map(currentRecords);
       updatedRecords.set(subagentId, { ...record, ...fields });
 
-      return [true, updatedRecords];
+      return Effect.succeed([undefined, updatedRecords] as const);
     });
-
-    if (!updated) {
-      return yield* SubagentNotFoundError.make({ subagentId });
-    }
-
-    return yield* Effect.void;
   });
 
   const get = Effect.fn("SubagentCheckpoint.get")(function* (subagentId: SubagentId) {
-    const currentRecords = yield* Ref.get(records);
+    const currentRecords = yield* SubscriptionRef.get(records);
     const record = currentRecords.get(subagentId);
 
     if (record === undefined) {
@@ -82,7 +70,21 @@ const make = Effect.gen(function* () {
     return record;
   });
 
-  return { put, update, get };
+  const changes = (subagentId: SubagentId) =>
+    SubscriptionRef.changes(records).pipe(
+      Stream.mapEffect((currentRecords) => {
+        const record = currentRecords.get(subagentId);
+
+        if (record === undefined) {
+          return SubagentNotFoundError.make({ subagentId });
+        }
+
+        return Effect.succeed(record);
+      }),
+      Stream.changes,
+    );
+
+  return { put, update, get, changes };
 });
 
 export class SubagentCheckpoint extends Context.Service<SubagentCheckpoint>()(
