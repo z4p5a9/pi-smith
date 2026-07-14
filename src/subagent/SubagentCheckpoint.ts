@@ -29,15 +29,15 @@ const make = Effect.gen(function* () {
   const records = yield* SubscriptionRef.make(new Map<SubagentId, SubagentRecord>());
 
   const put = Effect.fn("SubagentCheckpoint.put")(function* (record: SubagentRecord) {
-    yield* SubscriptionRef.modifyEffect(records, (currentRecords) => {
-      if (currentRecords.has(record.subagentId)) {
+    yield* SubscriptionRef.modifyEffect(records, (prev) => {
+      if (prev.has(record.subagentId)) {
         return SubagentAlreadyExistsError.make({ subagentId: record.subagentId });
       }
 
-      const updatedRecords = new Map(currentRecords);
-      updatedRecords.set(record.subagentId, record);
+      const next = new Map(prev);
+      next.set(record.subagentId, record);
 
-      return Effect.succeed([undefined, updatedRecords] as const);
+      return Effect.succeed([undefined, next] as const);
     });
   });
 
@@ -45,23 +45,23 @@ const make = Effect.gen(function* () {
     subagentId: SubagentId,
     fields: Partial<Omit<SubagentRecord, "subagentId">>,
   ) {
-    yield* SubscriptionRef.modifyEffect(records, (currentRecords) => {
-      const record = currentRecords.get(subagentId);
+    yield* SubscriptionRef.modifyEffect(records, (prev) => {
+      const record = prev.get(subagentId);
 
       if (record === undefined) {
         return SubagentNotFoundError.make({ subagentId });
       }
 
-      const updatedRecords = new Map(currentRecords);
-      updatedRecords.set(subagentId, { ...record, ...fields });
+      const next = new Map(prev);
+      next.set(subagentId, { ...record, ...fields });
 
-      return Effect.succeed([undefined, updatedRecords] as const);
+      return Effect.succeed([undefined, next] as const);
     });
   });
 
   const get = Effect.fn("SubagentCheckpoint.get")(function* (subagentId: SubagentId) {
-    const currentRecords = yield* SubscriptionRef.get(records);
-    const record = currentRecords.get(subagentId);
+    const ref = yield* SubscriptionRef.get(records);
+    const record = ref.get(subagentId);
 
     if (record === undefined) {
       return yield* SubagentNotFoundError.make({ subagentId });
@@ -72,8 +72,8 @@ const make = Effect.gen(function* () {
 
   const changes = (subagentId: SubagentId) =>
     SubscriptionRef.changes(records).pipe(
-      Stream.mapEffect((currentRecords) => {
-        const record = currentRecords.get(subagentId);
+      Stream.mapEffect((ref) => {
+        const record = ref.get(subagentId);
 
         if (record === undefined) {
           return SubagentNotFoundError.make({ subagentId });

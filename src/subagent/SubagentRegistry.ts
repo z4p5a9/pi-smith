@@ -24,15 +24,15 @@ const make = Effect.gen(function* () {
     subagentId: SubagentId,
     process: SubagentProcess,
   ) {
-    const registered = yield* Ref.modify(processes, (currentProcesses) => {
-      if (currentProcesses.has(subagentId)) {
-        return [false, currentProcesses] as const;
+    const registered = yield* Ref.modify(processes, (prev) => {
+      if (prev.has(subagentId)) {
+        return [false, prev] as const;
       }
 
-      const updatedProcesses = new Map(currentProcesses);
-      updatedProcesses.set(subagentId, process);
+      const next = new Map(prev);
+      next.set(subagentId, process);
 
-      return [true, updatedProcesses] as const;
+      return [true, next] as const;
     });
 
     if (!registered) {
@@ -43,8 +43,8 @@ const make = Effect.gen(function* () {
   });
 
   const get = Effect.fn("SubagentRegistry.get")(function* (subagentId: SubagentId) {
-    const currentProcesses = yield* Ref.get(processes);
-    const process = currentProcesses.get(subagentId);
+    const ref = yield* Ref.get(processes);
+    const process = ref.get(subagentId);
 
     if (process === undefined) {
       return yield* SubagentNotRegisteredError.make({ subagentId });
@@ -54,15 +54,15 @@ const make = Effect.gen(function* () {
   });
 
   const unregister = Effect.fn("SubagentRegistry.unregister")(function* (subagentId: SubagentId) {
-    yield* Ref.update(processes, (currentProcesses) => {
-      if (!currentProcesses.has(subagentId)) {
-        return currentProcesses;
+    yield* Ref.update(processes, (prev) => {
+      if (!prev.has(subagentId)) {
+        return prev;
       }
 
-      const updatedProcesses = new Map(currentProcesses);
-      updatedProcesses.delete(subagentId);
+      const next = new Map(prev);
+      next.delete(subagentId);
 
-      return updatedProcesses;
+      return next;
     });
   });
 
