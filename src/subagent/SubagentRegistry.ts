@@ -20,10 +20,8 @@ export class SubagentNotRegisteredError extends Schema.TaggedErrorClass<Subagent
 const make = Effect.gen(function* () {
   const processes = yield* Ref.make(new Map<SubagentId, SubagentProcess>());
 
-  const register = Effect.fn("SubagentRegistry.register")(function* (
-    subagentId: SubagentId,
-    process: SubagentProcess,
-  ) {
+  const register = Effect.fn("SubagentRegistry.register")(function* (process: SubagentProcess) {
+    const subagentId = process.subagentId;
     const registered = yield* Ref.modify(processes, (prev) => {
       if (prev.has(subagentId)) {
         return [false, prev] as const;

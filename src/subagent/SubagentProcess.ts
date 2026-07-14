@@ -4,6 +4,7 @@ import type { SubagentId } from "./SubagentId.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export interface SubagentProcess {
+  readonly subagentId: SubagentId;
   readonly await: Effect.Effect<never>;
 }
 
@@ -14,6 +15,7 @@ export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(function*
   yield* Effect.annotateCurrentSpan({ subagentId });
 
   return {
+    subagentId,
     // oxlint-disable-next-line no-warning-comments
     // TODO: Replace with the concrete process lifetime.
     await: Effect.never,

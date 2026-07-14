@@ -16,7 +16,7 @@ it.describe("SubagentRegistry", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
 
-      yield* registry.register(subagentId, process);
+      yield* registry.register(process);
 
       expect(yield* registry.get(subagentId)).toBe(process);
     }).pipe(Effect.provide(SubagentRegistry.layer)),
@@ -28,8 +28,8 @@ it.describe("SubagentRegistry", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
 
-      yield* registry.register(subagentId, process);
-      const error = yield* registry.register(subagentId, process).pipe(Effect.flip);
+      yield* registry.register(process);
+      const error = yield* registry.register(process).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(SubagentAlreadyRegisteredError);
       expect(error.subagentId).toBe(subagentId);
@@ -53,7 +53,7 @@ it.describe("SubagentRegistry", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
 
-      yield* registry.register(subagentId, process);
+      yield* registry.register(process);
       yield* registry.unregister(subagentId);
       const error = yield* registry.get(subagentId).pipe(Effect.flip);
 
