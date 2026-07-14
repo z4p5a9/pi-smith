@@ -37,15 +37,16 @@ it.describe("SubagentSupervisor", () => {
     }).pipe(Effect.provide(SubagentSupervisor.layer)),
   );
 
-  it.effect("registers a started child", () =>
+  it.effect("registers a running child", () =>
     Effect.gen(function* () {
       const supervisor = yield* SubagentSupervisor;
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
       yield* supervisor.start(subagentId, { title: "Review API" });
+      const process = yield* registry.get(subagentId);
 
-      expect(yield* registry.get(subagentId)).toBeDefined();
+      expect(yield* process.status).toBe("running");
     }).pipe(Effect.provide(SubagentSupervisor.layer)),
   );
 });
