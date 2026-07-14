@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { Type } from "typebox";
 
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
@@ -7,7 +7,7 @@ import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
 
 export default function extension(pi: ExtensionAPI): void {
-  const runtime = ManagedRuntime.make(Layer.merge(SubagentCheckpoint.layer, SubagentPool.layer));
+  const runtime = ManagedRuntime.make(SubagentPool.layer);
 
   pi.on("session_shutdown", () => runtime.dispose());
 

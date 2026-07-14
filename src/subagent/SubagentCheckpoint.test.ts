@@ -1,7 +1,11 @@
 import { expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { SubagentAlreadyExistsError, SubagentCheckpoint } from "./SubagentCheckpoint.ts";
+import {
+  SubagentAlreadyExistsError,
+  SubagentCheckpoint,
+  SubagentNotFoundError,
+} from "./SubagentCheckpoint.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 
 it.describe("SubagentCheckpoint", () => {
@@ -24,6 +28,50 @@ it.describe("SubagentCheckpoint", () => {
       const error = yield* checkpoint.put(record).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(SubagentAlreadyExistsError);
+      expect(error.subagentId).toBe(subagentId);
+    }).pipe(Effect.provide(SubagentCheckpoint.layer)),
+  );
+
+  it.effect("updates an existing subagent record", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+
+      yield* checkpoint.put({ subagentId, status: "queued", title: "Review API" });
+      yield* checkpoint.update(subagentId, { status: "starting" });
+    }).pipe(Effect.provide(SubagentCheckpoint.layer)),
+  );
+
+  it.effect("rejects an update for an unknown subagent ID", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const error = yield* checkpoint.update(subagentId, { status: "starting" }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(SubagentNotFoundError);
+      expect(error.subagentId).toBe(subagentId);
+    }).pipe(Effect.provide(SubagentCheckpoint.layer)),
+  );
+
+  it.effect("gets an existing subagent record", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const record = { subagentId, status: "queued" as const, title: "Review API" };
+
+      yield* checkpoint.put(record);
+
+      expect(yield* checkpoint.get(subagentId)).toEqual(record);
+    }).pipe(Effect.provide(SubagentCheckpoint.layer)),
+  );
+
+  it.effect("rejects a get for an unknown subagent ID", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const error = yield* checkpoint.get(subagentId).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(SubagentNotFoundError);
       expect(error.subagentId).toBe(subagentId);
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
