@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 
 import { decodeSubagentId } from "./SubagentId.ts";
-import { spawnSubagentProcess } from "./SubagentProcess.ts";
+import type { SubagentProcess } from "./SubagentProcess.ts";
 import {
   SubagentAlreadyRegisteredError,
   SubagentNotRegisteredError,
@@ -14,10 +14,11 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, {
-        title: "Review API",
-        cwd: "/worktree",
-      });
+      const process = {
+        subagentId,
+        status: Effect.succeed("running" as const),
+        await: Effect.never,
+      } satisfies SubagentProcess;
 
       yield* registry.register(process);
 
@@ -29,10 +30,11 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, {
-        title: "Review API",
-        cwd: "/worktree",
-      });
+      const process = {
+        subagentId,
+        status: Effect.succeed("running" as const),
+        await: Effect.never,
+      } satisfies SubagentProcess;
 
       yield* registry.register(process);
       const error = yield* registry.register(process).pipe(Effect.flip);
@@ -57,10 +59,11 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, {
-        title: "Review API",
-        cwd: "/worktree",
-      });
+      const process = {
+        subagentId,
+        status: Effect.succeed("running" as const),
+        await: Effect.never,
+      } satisfies SubagentProcess;
 
       yield* registry.register(process);
       yield* registry.unregister(subagentId);

@@ -7,6 +7,8 @@ import { Effect } from "effect";
 it.describe("root extension", () => {
   it.effect("registers the subagent tool", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
+    vi.stubEnv("CMUX_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111");
+    vi.stubEnv("CMUX_SURFACE_ID", "22222222-2222-4222-8222-222222222222");
 
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>

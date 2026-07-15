@@ -1,25 +1,48 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
-import type { SubagentId } from "./SubagentId.ts";
+import { SubagentBridge, type SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import { SubagentHost } from "./SubagentHost.ts";
+import { SubagentId } from "./SubagentId.ts";
+import { makePiSubagentCommand } from "./PiSubagentHarness.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export interface SubagentProcess {
   readonly subagentId: SubagentId;
   readonly status: Effect.Effect<"running">;
-  readonly await: Effect.Effect<never>;
+  readonly await: Effect.Effect<void, SubagentBridgeDisconnectedError>;
 }
 
-export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(function* (
-  subagentId: SubagentId,
-  _spec: SubagentSpec,
-) {
-  yield* Effect.annotateCurrentSpan({ subagentId });
+export class SubagentProcessStartTimeoutError extends Schema.TaggedErrorClass<SubagentProcessStartTimeoutError>()(
+  "SubagentProcessStartTimeoutError",
+  {
+    subagentId: SubagentId,
+  },
+) {}
 
-  return {
-    subagentId,
-    status: Effect.succeed("running" as const),
-    // oxlint-disable-next-line no-warning-comments
-    // TODO: Replace with the concrete process lifetime.
-    await: Effect.never,
-  } satisfies SubagentProcess;
-});
+export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(
+  function* (subagentId: SubagentId, spec: SubagentSpec) {
+    yield* Effect.annotateCurrentSpan({ subagentId });
+
+    const bridge = yield* SubagentBridge;
+    const host = yield* SubagentHost;
+    const listener = yield* bridge.listen(subagentId);
+    const command = yield* makePiSubagentCommand(subagentId, spec);
+
+    yield* host.start(subagentId, spec, command);
+
+    const session = yield* listener.accept;
+
+    return {
+      subagentId,
+      status: Effect.succeed("running" as const),
+      await: session.await,
+    } satisfies SubagentProcess;
+  },
+  (effect, subagentId) =>
+    effect.pipe(
+      Effect.timeoutOrElse({
+        duration: "30 seconds",
+        orElse: () => SubagentProcessStartTimeoutError.make({ subagentId }),
+      }),
+    ),
+);

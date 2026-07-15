@@ -22,10 +22,7 @@ const make = Effect.gen(function* () {
       yield* checkpoint.update(subagentId, { status: "running" });
       yield* child.await;
     },
-    Effect.catchTag(
-      ["SubagentNotFoundError", "SubagentAlreadyStartedError", "SubagentAlreadyRegisteredError"],
-      Effect.logError,
-    ),
+    Effect.catch(Effect.logError),
     (effect, subagentId) => Effect.annotateLogs(effect, { subagentId }),
   );
 

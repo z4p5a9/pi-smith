@@ -1,10 +1,13 @@
+import { NodeChildProcessSpawner, NodeFileSystem, NodePath } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Config, ConfigProvider, Effect, ManagedRuntime, Option } from "effect";
+import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
 import { Type } from "typebox";
 
+import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
+import { layer as unixSocketSubagentBridgeLayer } from "./subagent/UnixSocketSubagentBridge.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const childMarker = Effect.runSync(
@@ -20,7 +23,27 @@ export default function extension(pi: ExtensionAPI): void {
     return;
   }
 
-  const runtime = ManagedRuntime.make(SubagentPool.layer);
+  const [workspaceId, surfaceId] = Effect.runSync(
+    Effect.all([
+      Config.schema(Schema.String.check(Schema.isUUID()), "CMUX_WORKSPACE_ID"),
+      Config.schema(Schema.String.check(Schema.isUUID()), "CMUX_SURFACE_ID"),
+    ]).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({ preserveEmptyStrings: true }),
+      ),
+    ),
+  );
+
+  const runtime = ManagedRuntime.make(
+    SubagentPool.layer.pipe(
+      Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
+      Layer.provide(unixSocketSubagentBridgeLayer),
+      Layer.provide(NodeChildProcessSpawner.layer),
+      Layer.provide(NodeFileSystem.layer),
+      Layer.provide(NodePath.layer),
+    ),
+  );
 
   pi.on("session_shutdown", () => runtime.dispose());
 

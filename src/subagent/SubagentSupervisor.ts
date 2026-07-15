@@ -1,5 +1,17 @@
-import { Context, Effect, Exit, Fiber, FiberMap, Layer, Schema, Scope, Semaphore } from "effect";
+import {
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  FiberMap,
+  Layer,
+  RcMap,
+  Schema,
+  Scope,
+  Semaphore,
+} from "effect";
 
+import type { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { type SubagentProcess, spawnSubagentProcess } from "./SubagentProcess.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
@@ -15,8 +27,10 @@ export class SubagentAlreadyStartedError extends Schema.TaggedErrorClass<Subagen
 const make = Effect.gen(function* () {
   const supervisorScope = yield* Scope.Scope;
   const registry = yield* SubagentRegistry;
-  const children = yield* FiberMap.make<SubagentId, never, never>();
-  const startLock = yield* Semaphore.make(1);
+  const children = yield* FiberMap.make<SubagentId, void, SubagentBridgeDisconnectedError>();
+  const startLocks = yield* RcMap.make({
+    lookup: (_subagentId: SubagentId) => Semaphore.make(1),
+  });
 
   const supervise = Effect.fn("SubagentSupervisor.supervise")(function* (
     process: SubagentProcess,
@@ -24,10 +38,6 @@ const make = Effect.gen(function* () {
   ) {
     const subagentId = process.subagentId;
     yield* Effect.annotateCurrentSpan({ subagentId });
-
-    if (yield* FiberMap.has(children, subagentId)) {
-      return yield* SubagentAlreadyStartedError.make({ subagentId });
-    }
 
     yield* Effect.acquireRelease(registry.register(process), () =>
       registry.unregister(subagentId),
@@ -46,28 +56,39 @@ const make = Effect.gen(function* () {
     );
 
     return { await: Fiber.await(fiber) };
-  }, Semaphore.withPermit(startLock));
+  });
 
-  const start = Effect.fn("SubagentSupervisor.start")(function* (
-    subagentId: SubagentId,
-    spec: SubagentSpec,
-  ) {
-    yield* Effect.annotateCurrentSpan({ subagentId });
+  const start = Effect.fn("SubagentSupervisor.start")(
+    function* (subagentId: SubagentId, spec: SubagentSpec) {
+      yield* Effect.annotateCurrentSpan({ subagentId });
 
-    const childScope = yield* Scope.fork(supervisorScope);
-    const exit = yield* Effect.gen(function* () {
-      const process = yield* spawnSubagentProcess(subagentId, spec).pipe(Scope.provide(childScope));
+      if (yield* FiberMap.has(children, subagentId)) {
+        return yield* SubagentAlreadyStartedError.make({ subagentId });
+      }
 
-      return yield* supervise(process, childScope);
-    }).pipe(Effect.interruptible, Effect.exit);
+      const childScope = yield* Scope.fork(supervisorScope);
+      const exit = yield* Effect.gen(function* () {
+        const process = yield* spawnSubagentProcess(subagentId, spec).pipe(
+          Scope.provide(childScope),
+        );
 
-    if (Exit.isFailure(exit)) {
-      yield* Scope.close(childScope, exit);
-      return yield* exit;
-    }
+        return yield* supervise(process, childScope);
+      }).pipe(Effect.interruptible, Effect.exit);
 
-    return exit.value;
-  }, Effect.uninterruptible);
+      if (Exit.isFailure(exit)) {
+        yield* Scope.close(childScope, exit);
+        return yield* exit;
+      }
+
+      return exit.value;
+    },
+    (effect, subagentId) =>
+      Effect.scoped(
+        RcMap.get(startLocks, subagentId).pipe(
+          Effect.flatMap((startLock) => startLock.withPermit(effect)),
+        ),
+      ).pipe(Effect.uninterruptible),
+  );
 
   return { start };
 });
