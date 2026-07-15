@@ -1,6 +1,7 @@
 import { Effect, Random, Schema } from "effect";
 
 export const SubagentId = Schema.String.check(
+  Schema.isMaxLength(60),
   Schema.isPattern(/^sa_[a-z0-9]{8}_[a-z0-9]+(?:-[a-z0-9]+)*$/),
 ).pipe(Schema.brand("SubagentId"));
 

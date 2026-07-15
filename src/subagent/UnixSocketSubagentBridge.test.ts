@@ -7,6 +7,7 @@ import {
   SubagentBridgeConnectError,
   SubagentBridgeDisconnectedError,
 } from "./SubagentBridge.ts";
+import { maxSubagentBridgeHandshakeBytes } from "./SubagentBridgeProtocol.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { layer as unixSocketSubagentBridgeLayer } from "./UnixSocketSubagentBridge.ts";
 
@@ -75,6 +76,34 @@ it.describe("UnixSocketSubagentBridge", () => {
       const invalidConnection = yield* socket
         .run(() => undefined, {
           onOpen: write(`${handshake}\n`).pipe(Effect.orDie),
+        })
+        .pipe(Effect.forkScoped);
+      yield* Fiber.await(invalidConnection);
+
+      const child = yield* bridge.connect(subagentId);
+      const root = yield* listener.accept;
+
+      expect(child).toHaveProperty("await");
+      expect(root).toHaveProperty("await");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+    ),
+  );
+
+  it.effect("accepts a valid connection after rejecting an oversized handshake", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-oversized");
+      const listener = yield* bridge.listen(subagentId);
+      const socket = yield* NodeSocket.makeNet({
+        path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
+      });
+      const write = yield* socket.writer;
+
+      const invalidConnection = yield* socket
+        .run(() => undefined, {
+          onOpen: write("x".repeat(maxSubagentBridgeHandshakeBytes + 1)).pipe(Effect.orDie),
         })
         .pipe(Effect.forkScoped);
       yield* Fiber.await(invalidConnection);

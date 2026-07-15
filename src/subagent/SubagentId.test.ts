@@ -41,4 +41,12 @@ it.describe("generateSubagentId", () => {
       expect(subagentId.split("_")[2]).toHaveLength(48);
     }),
   );
+
+  it.effect("rejects subagent IDs longer than the generated format", () =>
+    Effect.gen(function* () {
+      const error = yield* decodeSubagentId(`sa_12345678_${"a".repeat(49)}`).pipe(Effect.flip);
+
+      expect(error).toBeDefined();
+    }),
+  );
 });
