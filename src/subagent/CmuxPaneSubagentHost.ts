@@ -1,0 +1,148 @@
+import { Effect, Layer, Schema, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+
+import type { SubagentId } from "./SubagentId.ts";
+import {
+  SubagentHost,
+  SubagentHostResponseError,
+  SubagentHostStartError,
+  SubagentHostUnavailableError,
+  type SubagentCommand,
+} from "./SubagentHost.ts";
+import type { SubagentSpec } from "./SubagentSpec.ts";
+
+const encodeCmuxRpcParams = Schema.encodeEffect(Schema.UnknownFromJsonString);
+
+const CmuxPaneCreateResponse = Schema.Struct({
+  workspace_id: Schema.String.check(Schema.isUUID()),
+  pane_id: Schema.String.check(Schema.isUUID()),
+  surface_id: Schema.String.check(Schema.isUUID()),
+});
+
+const decodeCmuxPaneCreateResponse = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(CmuxPaneCreateResponse),
+);
+
+const make = (root: { readonly workspaceId: string; readonly surfaceId: string }) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+    const rpc = Effect.fn("CmuxPaneSubagentHost.rpc")(function* (
+      method: string,
+      params: Readonly<Record<string, unknown>>,
+    ) {
+      const encodedParams = yield* encodeCmuxRpcParams(params).pipe(Effect.orDie);
+      const process = yield* spawner.spawn(
+        ChildProcess.make("cmux", ["rpc", method, encodedParams], {
+          detached: false,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+      const [exitCode, stdout, stderr] = yield* Effect.all(
+        [
+          process.exitCode,
+          process.stdout.pipe(Stream.decodeText, Stream.mkString),
+          process.stderr.pipe(Stream.decodeText, Stream.mkString),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      return { exitCode, stdout, stderr };
+    });
+
+    const create = Effect.fn("CmuxPaneSubagentHost.create")(function* (
+      subagentId: SubagentId,
+      command: SubagentCommand,
+      workspaceId: string,
+      surfaceId: string,
+    ) {
+      const initialCommand = [command.executable, ...command.args]
+        .map((argument) => `'${argument.replaceAll("'", `'"'"'`)}'`)
+        .join(" ");
+      const result = yield* rpc("pane.create", {
+        workspace_id: workspaceId,
+        surface_id: surfaceId,
+        direction: "right",
+        type: "terminal",
+        focus: false,
+        initial_command: initialCommand,
+        working_directory: command.cwd,
+        startup_environment: command.env,
+      }).pipe(
+        Effect.scoped,
+        Effect.mapError((error) =>
+          SubagentHostUnavailableError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: error.message,
+          }),
+        ),
+      );
+
+      if (result.exitCode !== 0) {
+        return yield* SubagentHostStartError.make({
+          subagentId,
+          host: "cmux-pane",
+          exitCode: result.exitCode,
+          reason: result.stderr.trim(),
+        });
+      }
+
+      const response = yield* decodeCmuxPaneCreateResponse(result.stdout).pipe(
+        Effect.mapError((error) =>
+          SubagentHostResponseError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: String(error),
+          }),
+        ),
+      );
+
+      return response;
+    });
+
+    const close = Effect.fn("CmuxPaneSubagentHost.close")(function* (
+      workspaceId: string,
+      surfaceId: string,
+    ) {
+      const result = yield* rpc("surface.close", {
+        workspace_id: workspaceId,
+        surface_id: surfaceId,
+      }).pipe(Effect.scoped);
+
+      if (result.exitCode !== 0) {
+        return yield* Effect.fail(result.stderr.trim());
+      }
+
+      return yield* Effect.void;
+    });
+
+    const start = Effect.fn("SubagentHost.start")(function* (
+      subagentId: SubagentId,
+      _spec: SubagentSpec,
+      command: SubagentCommand,
+    ) {
+      yield* Effect.annotateCurrentSpan({ subagentId, host: "cmux-pane" });
+
+      const response = yield* Effect.acquireRelease(
+        create(subagentId, command, root.workspaceId, root.surfaceId),
+        (pane) =>
+          close(pane.workspace_id, pane.surface_id).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Failed to close CMUX subagent pane", error).pipe(
+                Effect.annotateLogs({ subagentId, host: "cmux-pane" }),
+              ),
+            ),
+          ),
+      );
+
+      return { hostId: response.surface_id };
+    });
+
+    return { start };
+  });
+
+export const layer = (root: { readonly workspaceId: string; readonly surfaceId: string }) =>
+  Layer.effect(SubagentHost, make(root));
