@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Effect, ManagedRuntime } from "effect";
+import { Config, ConfigProvider, Effect, ManagedRuntime, Option } from "effect";
 import { Type } from "typebox";
 
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
@@ -7,6 +7,19 @@ import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
 
 export default function extension(pi: ExtensionAPI): void {
+  const childMarker = Effect.runSync(
+    Config.option(Config.string("SMITH_SUBAGENT_ID")).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({ preserveEmptyStrings: true }),
+      ),
+    ),
+  );
+
+  if (Option.isSome(childMarker)) {
+    return;
+  }
+
   const runtime = ManagedRuntime.make(SubagentPool.layer);
 
   pi.on("session_shutdown", () => runtime.dispose());

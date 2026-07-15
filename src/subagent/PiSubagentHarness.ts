@@ -26,7 +26,7 @@ export const makePiSubagentCommand = Effect.fn("makePiSubagentCommand")(function
     args: [
       piEntrypoint,
       "--extension",
-      fileURLToPath(new URL("../index.ts", import.meta.url)),
+      fileURLToPath(new URL("../extension/PiSubagent.ts", import.meta.url)),
       "--name",
       spec.title,
     ],

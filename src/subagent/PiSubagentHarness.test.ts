@@ -23,7 +23,7 @@ it.describe("makePiSubagentCommand", () => {
         args: [
           process.argv[1],
           "--extension",
-          fileURLToPath(new URL("../index.ts", import.meta.url)),
+          fileURLToPath(new URL("../extension/PiSubagent.ts", import.meta.url)),
           "--name",
           "Review API",
         ],
