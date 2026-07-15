@@ -18,6 +18,7 @@ it.describe("SubagentCheckpoint", () => {
         subagentId,
         status: "queued",
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
@@ -31,6 +32,7 @@ it.describe("SubagentCheckpoint", () => {
         subagentId,
         status: "queued" as const,
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       };
 
@@ -51,6 +53,7 @@ it.describe("SubagentCheckpoint", () => {
         subagentId,
         status: "queued",
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
       yield* checkpoint.update(subagentId, { status: "starting" });
@@ -76,6 +79,7 @@ it.describe("SubagentCheckpoint", () => {
         subagentId,
         status: "queued" as const,
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       };
 
@@ -104,6 +108,7 @@ it.describe("SubagentCheckpoint", () => {
         subagentId,
         status: "queued" as const,
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       };
 

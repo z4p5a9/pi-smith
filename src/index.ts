@@ -50,7 +50,7 @@ export default function extension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    description: "Create a subagent identity from a title.",
+    description: "Create and start a subagent.",
     parameters: Type.Object(
       {
         title: Type.String({
@@ -58,16 +58,21 @@ export default function extension(pi: ExtensionAPI): void {
           minLength: 1,
           pattern: "\\S",
         }),
+        prompt: Type.String({
+          description: "Initial task prompt for the subagent.",
+          minLength: 1,
+          pattern: "\\S",
+        }),
       },
       { additionalProperties: false },
     ),
-    execute(toolCallId, { title }, _signal, _onUpdate, ctx) {
+    execute(toolCallId, { prompt, title }, _signal, _onUpdate, ctx) {
       return runtime.runPromise(
         Effect.gen(function* () {
           const subagentId = yield* generateSubagentId(title);
           const checkpoint = yield* SubagentCheckpoint;
           const pool = yield* SubagentPool;
-          const spec = { title, cwd: ctx.cwd };
+          const spec = { title, prompt, cwd: ctx.cwd };
 
           yield* checkpoint.put({ subagentId, status: "queued", ...spec });
           yield* pool.submit(subagentId, spec);

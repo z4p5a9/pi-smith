@@ -38,7 +38,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const handle = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           {
             executable: "/opt/pi",
             args: ["--title", "Review's API", ""],
@@ -109,7 +109,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const error = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped, Effect.flip);
@@ -142,7 +142,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const error = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped, Effect.flip);
@@ -174,7 +174,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const error = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped, Effect.flip);
@@ -213,7 +213,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const handle = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped);
@@ -250,7 +250,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const start = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped, Effect.forkChild({ startImmediately: true }));

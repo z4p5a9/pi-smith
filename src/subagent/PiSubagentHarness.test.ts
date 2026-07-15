@@ -15,6 +15,7 @@ it.describe("makePiSubagentCommand", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const command = yield* makePiSubagentCommand(subagentId, {
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
 
@@ -26,6 +27,7 @@ it.describe("makePiSubagentCommand", () => {
           fileURLToPath(new URL("../extension/PiSubagent.ts", import.meta.url)),
           "--name",
           "Review API",
+          "Complete the task.",
         ],
         cwd: "/worktree",
         env: { SMITH_SUBAGENT_ID: subagentId },
@@ -41,6 +43,7 @@ it.describe("makePiSubagentCommand", () => {
         () =>
           makePiSubagentCommand(subagentId, {
             title: "Review API",
+            prompt: "Complete the task.",
             cwd: "/worktree",
           }).pipe(Effect.flip),
         (piEntrypoint) =>

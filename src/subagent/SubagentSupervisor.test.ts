@@ -20,6 +20,7 @@ it.describe("SubagentSupervisor", () => {
 
       const child = yield* supervisor.start(subagentId, {
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
       const result = yield* child.await.pipe(Effect.timeoutOption("1 millis"), Effect.forkChild);
@@ -47,7 +48,7 @@ it.describe("SubagentSupervisor", () => {
       yield* testHost.stub([{ hostId: "test-host" }]);
 
       const start = supervisor
-        .start(subagentId, { title: "Review API", cwd: "/worktree" })
+        .start(subagentId, { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" })
         .pipe(
           Effect.as("started" as const),
           Effect.catchTag("SubagentAlreadyStartedError", Effect.succeed),
@@ -75,7 +76,11 @@ it.describe("SubagentSupervisor", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
       yield* testHost.stub([{ hostId: "test-host" }]);
-      yield* supervisor.start(subagentId, { title: "Review API", cwd: "/worktree" });
+      yield* supervisor.start(subagentId, {
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
       const process = yield* registry.get(subagentId);
 
       expect(yield* process.status).toBe("running");
@@ -102,6 +107,7 @@ it.describe("SubagentSupervisor", () => {
 
       const child = yield* supervisor.start(subagentId, {
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
 

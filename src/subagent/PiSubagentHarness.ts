@@ -29,6 +29,7 @@ export const makePiSubagentCommand = Effect.fn("makePiSubagentCommand")(function
       fileURLToPath(new URL("../extension/PiSubagent.ts", import.meta.url)),
       "--name",
       spec.title,
+      spec.prompt,
     ],
     cwd: spec.cwd,
     env: { SMITH_SUBAGENT_ID: subagentId },

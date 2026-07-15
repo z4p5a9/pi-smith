@@ -19,6 +19,7 @@ it.describe("spawnSubagentProcess", () => {
 
       const process = yield* spawnSubagentProcess(subagentId, {
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
 
@@ -51,6 +52,7 @@ it.describe("spawnSubagentProcess", () => {
 
       const result = yield* spawnSubagentProcess(subagentId, {
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       }).pipe(Effect.scoped, Effect.flip, Effect.forkChild({ startImmediately: true }));
 

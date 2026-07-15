@@ -23,7 +23,7 @@ it.describe("TestSubagentHost", () => {
           const listener = yield* bridge.listen(subagentId);
           const handle = yield* host.start(
             subagentId,
-            { title: "Review API", cwd: "/worktree" },
+            { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
             {
               executable: "pi",
               args: ["--name", "Review API"],
@@ -43,7 +43,7 @@ it.describe("TestSubagentHost", () => {
       expect(yield* testHost.calls).toEqual([
         {
           subagentId,
-          spec: { title: "Review API", cwd: "/worktree" },
+          spec: { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           command: {
             executable: "pi",
             args: ["--name", "Review API"],
@@ -80,7 +80,7 @@ it.describe("TestSubagentHost", () => {
       const error = yield* host
         .start(
           subagentId,
-          { title: "Review API", cwd: "/worktree" },
+          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           { executable: "pi", args: [] },
         )
         .pipe(Effect.scoped, Effect.flip);

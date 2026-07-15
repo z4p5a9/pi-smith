@@ -21,9 +21,14 @@ it.describe("SubagentPool", () => {
         subagentId,
         status: "queued",
         title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(subagentId, { title: "Review API", cwd: "/worktree" });
+      yield* pool.submit(subagentId, {
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       const record = yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -53,16 +58,25 @@ it.describe("SubagentPool", () => {
       yield* testHost.stub([{ hostId: "test-host" }]);
 
       for (let index = 0; index < 10; index++) {
-        yield* pool.submit(missingSubagentId, { title: "Missing", cwd: "/worktree" });
+        yield* pool.submit(missingSubagentId, {
+          title: "Missing",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+        });
       }
 
       yield* checkpoint.put({
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
+      yield* pool.submit(probeSubagentId, {
+        title: "Probe",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -95,9 +109,14 @@ it.describe("SubagentPool", () => {
         subagentId: duplicateSubagentId,
         status: "queued",
         title: "Duplicate",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(duplicateSubagentId, { title: "Duplicate", cwd: "/worktree" });
+      yield* pool.submit(duplicateSubagentId, {
+        title: "Duplicate",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       yield* checkpoint.changes(duplicateSubagentId).pipe(
         Stream.filter((record) => record.status === "running"),
@@ -107,16 +126,25 @@ it.describe("SubagentPool", () => {
       );
 
       for (let index = 0; index < 10; index++) {
-        yield* pool.submit(duplicateSubagentId, { title: "Duplicate", cwd: "/worktree" });
+        yield* pool.submit(duplicateSubagentId, {
+          title: "Duplicate",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+        });
       }
 
       yield* checkpoint.put({
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
+      yield* pool.submit(probeSubagentId, {
+        title: "Probe",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -158,20 +186,30 @@ it.describe("SubagentPool", () => {
         subagentId: failedSubagentId,
         status: "queued",
         title: "Failed",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
 
       for (let index = 0; index < 10; index++) {
-        yield* pool.submit(failedSubagentId, { title: "Failed", cwd: "/worktree" });
+        yield* pool.submit(failedSubagentId, {
+          title: "Failed",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+        });
       }
 
       yield* checkpoint.put({
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
+      yield* pool.submit(probeSubagentId, {
+        title: "Probe",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -222,9 +260,10 @@ it.describe("SubagentPool", () => {
           subagentId,
           status: "queued",
           title,
+          prompt: "Complete the task.",
           cwd: "/worktree",
         });
-        yield* pool.submit(subagentId, { title, cwd: "/worktree" });
+        yield* pool.submit(subagentId, { title, prompt: "Complete the task.", cwd: "/worktree" });
       }
 
       yield* Effect.forEach(
@@ -242,9 +281,14 @@ it.describe("SubagentPool", () => {
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
+      yield* pool.submit(probeSubagentId, {
+        title: "Probe",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
 
       expect((yield* checkpoint.get(probeSubagentId)).status).toBe("queued");
 
