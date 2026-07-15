@@ -7,7 +7,7 @@ export interface SubagentBridgeSession {
 }
 
 export interface SubagentBridgeListener {
-  readonly accept: Effect.Effect<SubagentBridgeSession, SubagentBridgeHandshakeError>;
+  readonly accept: Effect.Effect<SubagentBridgeSession>;
 }
 
 export class SubagentBridgeListenError extends Schema.TaggedErrorClass<SubagentBridgeListenError>()(

@@ -1,12 +1,11 @@
 import { NodeFileSystem, NodeSocket } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
 
 import {
   SubagentBridge,
   SubagentBridgeConnectError,
   SubagentBridgeDisconnectedError,
-  SubagentBridgeHandshakeError,
 } from "./SubagentBridge.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { layer as unixSocketSubagentBridgeLayer } from "./UnixSocketSubagentBridge.ts";
@@ -30,7 +29,7 @@ it.describe("UnixSocketSubagentBridge", () => {
     ),
   );
 
-  it.effect("rejects an invalid handshake", () =>
+  it.effect("accepts a valid connection after rejecting a malformed handshake", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-handshake");
@@ -41,15 +40,50 @@ it.describe("UnixSocketSubagentBridge", () => {
       const write = yield* socket.writer;
       const handshake = yield* encodeJson({ version: 2, subagentId }).pipe(Effect.orDie);
 
-      yield* socket
+      const invalidConnection = yield* socket
         .run(() => undefined, {
           onOpen: write(`${handshake}\n`).pipe(Effect.orDie),
         })
         .pipe(Effect.forkScoped);
+      yield* Fiber.await(invalidConnection);
 
-      const error = yield* listener.accept.pipe(Effect.flip);
+      const child = yield* bridge.connect(subagentId);
+      const root = yield* listener.accept;
 
-      expect(Schema.is(SubagentBridgeHandshakeError)(error)).toBe(true);
+      expect(child).toHaveProperty("await");
+      expect(root).toHaveProperty("await");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+    ),
+  );
+
+  it.effect("accepts a valid connection after rejecting another subagent", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-handshake");
+      const otherSubagentId = yield* decodeSubagentId("sa_87654321_other-subagent");
+      const listener = yield* bridge.listen(subagentId);
+      const socket = yield* NodeSocket.makeNet({
+        path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
+      });
+      const write = yield* socket.writer;
+      const handshake = yield* encodeJson({ version: 1, subagentId: otherSubagentId }).pipe(
+        Effect.orDie,
+      );
+
+      const invalidConnection = yield* socket
+        .run(() => undefined, {
+          onOpen: write(`${handshake}\n`).pipe(Effect.orDie),
+        })
+        .pipe(Effect.forkScoped);
+      yield* Fiber.await(invalidConnection);
+
+      const child = yield* bridge.connect(subagentId);
+      const root = yield* listener.accept;
+
+      expect(child).toHaveProperty("await");
+      expect(root).toHaveProperty("await");
     }).pipe(
       Effect.scoped,
       Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),

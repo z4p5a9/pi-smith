@@ -4,7 +4,6 @@ import {
   SubagentBridge,
   SubagentBridgeConnectError,
   SubagentBridgeDisconnectedError,
-  SubagentBridgeHandshakeError,
   SubagentBridgeListenError,
   type SubagentBridgeSession,
 } from "../subagent/SubagentBridge.ts";
@@ -15,7 +14,7 @@ const make = Effect.gen(function* () {
     readonly listeners: Map<
       SubagentId,
       {
-        readonly accepted: Deferred.Deferred<SubagentBridgeSession, SubagentBridgeHandshakeError>;
+        readonly accepted: Deferred.Deferred<SubagentBridgeSession>;
         readonly connected: boolean;
         readonly closed?: Deferred.Deferred<void>;
       }
@@ -32,7 +31,7 @@ const make = Effect.gen(function* () {
   });
 
   const listen = Effect.fn("TestSubagentBridge.listen")(function* (subagentId: SubagentId) {
-    const accepted = yield* Deferred.make<SubagentBridgeSession, SubagentBridgeHandshakeError>();
+    const accepted = yield* Deferred.make<SubagentBridgeSession>();
 
     yield* Ref.modify(state, (prev) => {
       if (prev.listeners.has(subagentId)) {
@@ -79,14 +78,6 @@ const make = Effect.gen(function* () {
 
           return [listener.closed, next] as const;
         });
-
-        yield* Deferred.fail(
-          accepted,
-          SubagentBridgeHandshakeError.make({
-            subagentId,
-            reason: "Bridge listener closed before a connection was accepted",
-          }),
-        );
 
         if (closed !== undefined) {
           yield* Deferred.succeed(closed, undefined);

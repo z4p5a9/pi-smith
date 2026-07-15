@@ -91,7 +91,7 @@ const make = Effect.gen(function* () {
         SubagentBridgeListenError.make({ subagentId, reason: error.message }),
       ),
     );
-    const accepted = yield* Deferred.make<SubagentBridgeSession, SubagentBridgeHandshakeError>();
+    const accepted = yield* Deferred.make<SubagentBridgeSession>();
 
     yield* server
       .run((socket) =>
@@ -156,18 +156,20 @@ const make = Effect.gen(function* () {
           const result = yield* Deferred.await(handshake).pipe(Effect.result);
 
           if (Result.isFailure(result)) {
-            yield* Deferred.fail(accepted, result.failure);
+            yield* Effect.logWarning("Rejected subagent bridge connection", result.failure).pipe(
+              Effect.annotateLogs({ subagentId, transport: "unix-socket" }),
+            );
             return;
           }
 
           if (result.success.subagentId !== subagentId) {
-            yield* Deferred.fail(
-              accepted,
+            yield* Effect.logWarning(
+              "Rejected subagent bridge connection",
               SubagentBridgeHandshakeError.make({
                 subagentId,
                 reason: `Expected subagent ID ${subagentId}, received ${result.success.subagentId}`,
               }),
-            );
+            ).pipe(Effect.annotateLogs({ subagentId, transport: "unix-socket" }));
             return;
           }
 
