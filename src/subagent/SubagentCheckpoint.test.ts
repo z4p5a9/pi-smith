@@ -14,7 +14,12 @@ it.describe("SubagentCheckpoint", () => {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
-      yield* checkpoint.put({ subagentId, status: "queued", title: "Review API" });
+      yield* checkpoint.put({
+        subagentId,
+        status: "queued",
+        title: "Review API",
+        cwd: "/worktree",
+      });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
 
@@ -22,7 +27,12 @@ it.describe("SubagentCheckpoint", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const record = { subagentId, status: "queued" as const, title: "Review API" };
+      const record = {
+        subagentId,
+        status: "queued" as const,
+        title: "Review API",
+        cwd: "/worktree",
+      };
 
       yield* checkpoint.put(record);
       const error = yield* checkpoint.put(record).pipe(Effect.flip);
@@ -37,7 +47,12 @@ it.describe("SubagentCheckpoint", () => {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
-      yield* checkpoint.put({ subagentId, status: "queued", title: "Review API" });
+      yield* checkpoint.put({
+        subagentId,
+        status: "queued",
+        title: "Review API",
+        cwd: "/worktree",
+      });
       yield* checkpoint.update(subagentId, { status: "starting" });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
@@ -57,7 +72,12 @@ it.describe("SubagentCheckpoint", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const record = { subagentId, status: "queued" as const, title: "Review API" };
+      const record = {
+        subagentId,
+        status: "queued" as const,
+        title: "Review API",
+        cwd: "/worktree",
+      };
 
       yield* checkpoint.put(record);
 
@@ -80,7 +100,12 @@ it.describe("SubagentCheckpoint", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const record = { subagentId, status: "queued" as const, title: "Review API" };
+      const record = {
+        subagentId,
+        status: "queued" as const,
+        title: "Review API",
+        cwd: "/worktree",
+      };
 
       yield* checkpoint.put(record);
 

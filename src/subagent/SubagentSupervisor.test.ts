@@ -11,7 +11,10 @@ it.describe("SubagentSupervisor", () => {
     Effect.gen(function* () {
       const supervisor = yield* SubagentSupervisor;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const child = yield* supervisor.start(subagentId, { title: "Review API" });
+      const child = yield* supervisor.start(subagentId, {
+        title: "Review API",
+        cwd: "/worktree",
+      });
       const result = yield* child.await.pipe(Effect.timeoutOption("1 millis"), Effect.forkChild);
 
       yield* TestClock.adjust("1 millis");
@@ -25,7 +28,7 @@ it.describe("SubagentSupervisor", () => {
       const supervisor = yield* SubagentSupervisor;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const start = supervisor
-        .start(subagentId, { title: "Review API" })
+        .start(subagentId, { title: "Review API", cwd: "/worktree" })
         .pipe(
           Effect.as("started" as const),
           Effect.catchTag("SubagentAlreadyStartedError", Effect.succeed),
@@ -43,7 +46,7 @@ it.describe("SubagentSupervisor", () => {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
-      yield* supervisor.start(subagentId, { title: "Review API" });
+      yield* supervisor.start(subagentId, { title: "Review API", cwd: "/worktree" });
       const process = yield* registry.get(subagentId);
 
       expect(yield* process.status).toBe("running");

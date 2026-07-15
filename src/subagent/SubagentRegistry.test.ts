@@ -14,7 +14,10 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
+      const process = yield* spawnSubagentProcess(subagentId, {
+        title: "Review API",
+        cwd: "/worktree",
+      });
 
       yield* registry.register(process);
 
@@ -26,7 +29,10 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
+      const process = yield* spawnSubagentProcess(subagentId, {
+        title: "Review API",
+        cwd: "/worktree",
+      });
 
       yield* registry.register(process);
       const error = yield* registry.register(process).pipe(Effect.flip);
@@ -51,7 +57,10 @@ it.describe("SubagentRegistry", () => {
     Effect.gen(function* () {
       const registry = yield* SubagentRegistry;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const process = yield* spawnSubagentProcess(subagentId, { title: "Review API" });
+      const process = yield* spawnSubagentProcess(subagentId, {
+        title: "Review API",
+        cwd: "/worktree",
+      });
 
       yield* registry.register(process);
       yield* registry.unregister(subagentId);

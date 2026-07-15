@@ -39,7 +39,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const handle = yield* host
         .start(
           subagentId,
-          { title: "Review API" },
+          { title: "Review API", cwd: "/worktree" },
           {
             executable: "/opt/pi",
             args: ["--title", "Review's API", ""],
@@ -108,7 +108,11 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const error = yield* host
-        .start(subagentId, { title: "Review API" }, { executable: "pi", args: [] })
+        .start(
+          subagentId,
+          { title: "Review API", cwd: "/worktree" },
+          { executable: "pi", args: [] },
+        )
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostUnavailableError)(error)).toBe(true);
@@ -137,7 +141,11 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const error = yield* host
-        .start(subagentId, { title: "Review API" }, { executable: "pi", args: [] })
+        .start(
+          subagentId,
+          { title: "Review API", cwd: "/worktree" },
+          { executable: "pi", args: [] },
+        )
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostStartError)(error)).toBe(true);
@@ -165,7 +173,11 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.stub([{ exitCode: 0, stdout: "{}" }]);
 
       const error = yield* host
-        .start(subagentId, { title: "Review API" }, { executable: "pi", args: [] })
+        .start(
+          subagentId,
+          { title: "Review API", cwd: "/worktree" },
+          { executable: "pi", args: [] },
+        )
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostResponseError)(error)).toBe(true);
@@ -202,7 +214,11 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const handle = yield* host
-        .start(subagentId, { title: "Review API" }, { executable: "pi", args: [] })
+        .start(
+          subagentId,
+          { title: "Review API", cwd: "/worktree" },
+          { executable: "pi", args: [] },
+        )
         .pipe(Effect.scoped);
 
       expect(handle.hostId).toBe(childSurfaceId);

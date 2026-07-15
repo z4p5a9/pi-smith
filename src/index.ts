@@ -25,13 +25,13 @@ export default function extension(pi: ExtensionAPI): void {
       },
       { additionalProperties: false },
     ),
-    execute(toolCallId, { title }) {
+    execute(toolCallId, { title }, _signal, _onUpdate, ctx) {
       return runtime.runPromise(
         Effect.gen(function* () {
           const subagentId = yield* generateSubagentId(title);
           const checkpoint = yield* SubagentCheckpoint;
           const pool = yield* SubagentPool;
-          const spec = { title };
+          const spec = { title, cwd: ctx.cwd };
 
           yield* checkpoint.put({ subagentId, status: "queued", ...spec });
           yield* pool.submit(subagentId, spec);

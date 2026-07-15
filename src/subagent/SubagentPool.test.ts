@@ -12,8 +12,13 @@ it.describe("SubagentPool", () => {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
-      yield* checkpoint.put({ subagentId, status: "queued", title: "Review API" });
-      yield* pool.submit(subagentId, { title: "Review API" });
+      yield* checkpoint.put({
+        subagentId,
+        status: "queued",
+        title: "Review API",
+        cwd: "/worktree",
+      });
+      yield* pool.submit(subagentId, { title: "Review API", cwd: "/worktree" });
 
       const record = yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -32,15 +37,16 @@ it.describe("SubagentPool", () => {
       const probeSubagentId = yield* decodeSubagentId("sa_87654321_probe");
 
       for (let index = 0; index < 10; index++) {
-        yield* pool.submit(missingSubagentId, { title: "Missing" });
+        yield* pool.submit(missingSubagentId, { title: "Missing", cwd: "/worktree" });
       }
 
       yield* checkpoint.put({
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe" });
+      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -62,8 +68,9 @@ it.describe("SubagentPool", () => {
         subagentId: duplicateSubagentId,
         status: "queued",
         title: "Duplicate",
+        cwd: "/worktree",
       });
-      yield* pool.submit(duplicateSubagentId, { title: "Duplicate" });
+      yield* pool.submit(duplicateSubagentId, { title: "Duplicate", cwd: "/worktree" });
 
       yield* checkpoint.changes(duplicateSubagentId).pipe(
         Stream.filter((record) => record.status === "running"),
@@ -73,15 +80,16 @@ it.describe("SubagentPool", () => {
       );
 
       for (let index = 0; index < 10; index++) {
-        yield* pool.submit(duplicateSubagentId, { title: "Duplicate" });
+        yield* pool.submit(duplicateSubagentId, { title: "Duplicate", cwd: "/worktree" });
       }
 
       yield* checkpoint.put({
         subagentId: probeSubagentId,
         status: "queued",
         title: "Probe",
+        cwd: "/worktree",
       });
-      yield* pool.submit(probeSubagentId, { title: "Probe" });
+      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
