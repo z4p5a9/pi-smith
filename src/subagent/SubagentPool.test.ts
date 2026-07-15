@@ -190,4 +190,88 @@ it.describe("SubagentPool", () => {
       ),
     ),
   );
+
+  it.effect("records failure and reuses the slot after a child disconnects", () =>
+    Effect.gen(function* () {
+      const pool = yield* SubagentPool;
+      const checkpoint = yield* SubagentCheckpoint;
+      const testBridge = yield* TestSubagentBridge;
+      const testHost = yield* TestSubagentHost;
+      const failedSubagentId = yield* decodeSubagentId("sa_00000001_worker-1");
+      const subagentIds = [
+        failedSubagentId,
+        ...(yield* Effect.forEach(
+          Array.from(
+            { length: 9 },
+            (_, index) => `sa_${String(index + 2).padStart(8, "0")}_worker-${String(index + 2)}`,
+          ),
+          decodeSubagentId,
+        )),
+      ];
+      const probeSubagentId = yield* decodeSubagentId("sa_87654321_probe");
+
+      yield* testHost.stub([
+        ...subagentIds.map((_, index) => ({ hostId: `host-${String(index + 1)}` })),
+        { hostId: "probe-host" },
+      ]);
+
+      for (const [index, subagentId] of subagentIds.entries()) {
+        const title = `Worker ${String(index + 1)}`;
+
+        yield* checkpoint.put({
+          subagentId,
+          status: "queued",
+          title,
+          cwd: "/worktree",
+        });
+        yield* pool.submit(subagentId, { title, cwd: "/worktree" });
+      }
+
+      yield* Effect.forEach(
+        subagentIds,
+        (subagentId) =>
+          checkpoint.changes(subagentId).pipe(
+            Stream.filter((record) => record.status === "running"),
+            Stream.runHead,
+            Effect.flatMap(Effect.fromOption),
+          ),
+        { concurrency: "unbounded" },
+      );
+
+      yield* checkpoint.put({
+        subagentId: probeSubagentId,
+        status: "queued",
+        title: "Probe",
+        cwd: "/worktree",
+      });
+      yield* pool.submit(probeSubagentId, { title: "Probe", cwd: "/worktree" });
+
+      expect((yield* checkpoint.get(probeSubagentId)).status).toBe("queued");
+
+      yield* testBridge.disconnect(failedSubagentId);
+
+      const failed = yield* checkpoint.changes(failedSubagentId).pipe(
+        Stream.filter((record) => record.status === "failed"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+      const probe = yield* checkpoint.changes(probeSubagentId).pipe(
+        Stream.filter((record) => record.status === "running"),
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+
+      expect(failed.status).toBe("failed");
+      expect(probe.status).toBe("running");
+      expect(yield* testHost.active).toHaveLength(10);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.provide(
+        SubagentPool.layer.pipe(
+          Layer.provideMerge(TestSubagentHost.layer),
+          Layer.provideMerge(TestSubagentBridge.layer),
+        ),
+      ),
+    ),
+  );
 });

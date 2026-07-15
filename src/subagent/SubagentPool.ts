@@ -19,8 +19,14 @@ const make = Effect.gen(function* () {
 
       yield* checkpoint.update(subagentId, { status: "starting" });
       const child = yield* supervisor.start(subagentId, spec);
-      yield* checkpoint.update(subagentId, { status: "running" });
-      yield* child.await;
+      yield* checkpoint
+        .update(subagentId, { status: "running" })
+        .pipe(Effect.catch(Effect.logError));
+      yield* child.await.pipe(
+        Effect.tapError(() =>
+          checkpoint.update(subagentId, { status: "failed" }).pipe(Effect.catch(Effect.logError)),
+        ),
+      );
     },
     Effect.catch(Effect.logError),
     (effect, subagentId) => Effect.annotateLogs(effect, { subagentId }),

@@ -4,8 +4,9 @@ import { TestClock } from "effect/testing";
 
 import { TestSubagentBridge } from "../testing/TestSubagentBridge.ts";
 import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
+import { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
-import { SubagentRegistry } from "./SubagentRegistry.ts";
+import { SubagentNotRegisteredError, SubagentRegistry } from "./SubagentRegistry.ts";
 import { SubagentAlreadyStartedError, SubagentSupervisor } from "./SubagentSupervisor.ts";
 
 it.describe("SubagentSupervisor", () => {
@@ -78,6 +79,42 @@ it.describe("SubagentSupervisor", () => {
       const process = yield* registry.get(subagentId);
 
       expect(yield* process.status).toBe("running");
+      yield* testHost.verify;
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          SubagentSupervisor.layer,
+          TestSubagentHost.layer.pipe(Layer.provideMerge(TestSubagentBridge.layer)),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("propagates child failure after cleanup", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* SubagentSupervisor;
+      const registry = yield* SubagentRegistry;
+      const testBridge = yield* TestSubagentBridge;
+      const testHost = yield* TestSubagentHost;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+
+      yield* testHost.stub([{ hostId: "test-host" }]);
+
+      const child = yield* supervisor.start(subagentId, {
+        title: "Review API",
+        cwd: "/worktree",
+      });
+
+      yield* testBridge.disconnect(subagentId);
+
+      const error = yield* child.await.pipe(Effect.flip);
+      const registryError = yield* registry.get(subagentId).pipe(Effect.flip);
+
+      expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
+      expect(Schema.is(SubagentNotRegisteredError)(registryError)).toBe(true);
+      expect(yield* testHost.active).toEqual([]);
+      expect(yield* testBridge.isListening(subagentId)).toBe(false);
+      expect(yield* testBridge.isConnected(subagentId)).toBe(false);
       yield* testHost.verify;
     }).pipe(
       Effect.provide(

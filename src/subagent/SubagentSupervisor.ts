@@ -55,7 +55,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    return { await: Fiber.await(fiber) };
+    return { await: Fiber.join(fiber) };
   });
 
   const start = Effect.fn("SubagentSupervisor.start")(
