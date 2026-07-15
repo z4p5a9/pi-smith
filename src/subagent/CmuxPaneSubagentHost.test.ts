@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Layer, PlatformError, Schema } from "effect";
 
 import { TestChildProcessSpawner } from "../testing/TestChildProcessSpawner.ts";
-import * as CmuxPaneSubagentHost from "./CmuxPaneSubagentHost.ts";
+import { layer as cmuxPaneSubagentHostLayer } from "./CmuxPaneSubagentHost.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import {
   SubagentHost,
@@ -83,7 +83,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
-        CmuxPaneSubagentHost.layer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
+        cmuxPaneSubagentHostLayer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
         ),
       ),
@@ -115,7 +115,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
-        CmuxPaneSubagentHost.layer({
+        cmuxPaneSubagentHostLayer({
           workspaceId: "11111111-1111-4111-8111-111111111111",
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(Layer.provideMerge(TestChildProcessSpawner.layer)),
@@ -148,7 +148,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
-        CmuxPaneSubagentHost.layer({
+        cmuxPaneSubagentHostLayer({
           workspaceId: "11111111-1111-4111-8111-111111111111",
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(Layer.provideMerge(TestChildProcessSpawner.layer)),
@@ -172,7 +172,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
-        CmuxPaneSubagentHost.layer({
+        cmuxPaneSubagentHostLayer({
           workspaceId: "11111111-1111-4111-8111-111111111111",
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(Layer.provideMerge(TestChildProcessSpawner.layer)),
@@ -209,7 +209,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
-        CmuxPaneSubagentHost.layer({
+        cmuxPaneSubagentHostLayer({
           workspaceId,
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(Layer.provideMerge(TestChildProcessSpawner.layer)),

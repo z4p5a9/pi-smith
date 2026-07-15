@@ -32,6 +32,8 @@
     "check": "npm run verify:effect && npm run format:check && npm run lint && npm run typecheck && npm run test && npm run pack:check"
   },
   "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/platform-node-shared": "4.0.0-beta.97",
     "effect": "4.0.0-beta.97",
     "typebox": "1.1.38"
   },
