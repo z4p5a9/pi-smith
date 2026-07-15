@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Layer, PlatformError, Schema } from "effect";
+import { Effect, Fiber, Layer, PlatformError, Schema } from "effect";
+import { TestClock } from "effect/testing";
 
 import { TestChildProcessSpawner } from "../testing/TestChildProcessSpawner.ts";
 import { layer as cmuxPaneSubagentHostLayer } from "./CmuxPaneSubagentHost.ts";
@@ -26,14 +27,12 @@ it.describe("CmuxPaneSubagentHost", () => {
 
       yield* childProcesses.stub([
         {
-          exitCode: 0,
+          exitCode: Effect.succeed(0),
           stdout: encodeJson({
-            workspace_id: workspaceId,
-            pane_id: "33333333-3333-4333-8333-333333333333",
             surface_id: childSurfaceId,
           }),
         },
-        { exitCode: 0 },
+        { exitCode: Effect.succeed(0) },
       ]);
 
       const handle = yield* host
@@ -135,7 +134,7 @@ it.describe("CmuxPaneSubagentHost", () => {
 
       yield* childProcesses.stub([
         {
-          exitCode: 1,
+          exitCode: Effect.succeed(1),
           stderr: "method_not_found: Unknown method",
         },
       ]);
@@ -170,7 +169,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
 
-      yield* childProcesses.stub([{ exitCode: 0, stdout: "{}" }]);
+      yield* childProcesses.stub([{ exitCode: Effect.succeed(0), stdout: "{}" }]);
 
       const error = yield* host
         .start(
@@ -203,14 +202,12 @@ it.describe("CmuxPaneSubagentHost", () => {
 
       yield* childProcesses.stub([
         {
-          exitCode: 0,
+          exitCode: Effect.succeed(0),
           stdout: encodeJson({
-            workspace_id: workspaceId,
-            pane_id: "33333333-3333-4333-8333-333333333333",
             surface_id: childSurfaceId,
           }),
         },
-        { exitCode: 1, stderr: "surface not found" },
+        { exitCode: Effect.succeed(1), stderr: "surface not found" },
       ]);
 
       const handle = yield* host
@@ -222,6 +219,45 @@ it.describe("CmuxPaneSubagentHost", () => {
         .pipe(Effect.scoped);
 
       expect(handle.hostId).toBe(childSurfaceId);
+      yield* childProcesses.verify;
+    }).pipe(
+      Effect.provide(
+        cmuxPaneSubagentHostLayer({
+          workspaceId,
+          surfaceId: "22222222-2222-4222-8222-222222222222",
+        }).pipe(Layer.provideMerge(TestChildProcessSpawner.layer)),
+      ),
+    );
+  });
+
+  it.effect("stops waiting when pane cleanup times out", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const childSurfaceId = "44444444-4444-4444-8444-444444444444";
+
+    return Effect.gen(function* () {
+      const childProcesses = yield* TestChildProcessSpawner;
+      const host = yield* SubagentHost;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+
+      yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: childSurfaceId }),
+        },
+        { exitCode: Effect.never },
+      ]);
+
+      const start = yield* host
+        .start(
+          subagentId,
+          { title: "Review API", cwd: "/worktree" },
+          { executable: "pi", args: [] },
+        )
+        .pipe(Effect.scoped, Effect.forkChild({ startImmediately: true }));
+
+      yield* TestClock.adjust("20 seconds");
+
+      expect(yield* Fiber.join(start)).toEqual({ hostId: childSurfaceId });
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(

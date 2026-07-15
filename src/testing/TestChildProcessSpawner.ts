@@ -3,7 +3,7 @@ import { ChildProcessSpawner, type ChildProcess } from "effect/unstable/process"
 
 type SpawnStub =
   | {
-      readonly exitCode: number;
+      readonly exitCode: Effect.Effect<number, PlatformError.PlatformError>;
       readonly stdout?: string;
       readonly stderr?: string;
     }
@@ -46,10 +46,11 @@ const make = Effect.gen(function* () {
 
     const stdout = Stream.succeed(new TextEncoder().encode(result.stub.stdout ?? ""));
     const stderr = Stream.succeed(new TextEncoder().encode(result.stub.stderr ?? ""));
+    const exitCode = result.stub.exitCode.pipe(Effect.map(ChildProcessSpawner.ExitCode));
 
     return ChildProcessSpawner.makeHandle({
       pid: ChildProcessSpawner.ProcessId(result.pid),
-      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.stub.exitCode)),
+      exitCode,
       isRunning: Effect.succeed(false),
       kill: () => Effect.void,
       stdin: Sink.drain,

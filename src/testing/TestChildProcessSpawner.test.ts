@@ -11,7 +11,9 @@ it.describe("TestChildProcessSpawner", () => {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const command = ChildProcess.make("command", ["argument"]);
 
-      yield* childProcesses.stub([{ exitCode: 7, stdout: "output", stderr: "error" }]);
+      yield* childProcesses.stub([
+        { exitCode: Effect.succeed(7), stdout: "output", stderr: "error" },
+      ]);
 
       const process = yield* spawner.spawn(command);
       const [exitCode, stdout, stderr] = yield* Effect.all([
@@ -51,7 +53,7 @@ it.describe("TestChildProcessSpawner", () => {
     Effect.gen(function* () {
       const childProcesses = yield* TestChildProcessSpawner;
 
-      yield* childProcesses.stub([{ exitCode: 0 }]);
+      yield* childProcesses.stub([{ exitCode: Effect.succeed(0) }]);
 
       const exit = yield* childProcesses.verify.pipe(Effect.exit);
 

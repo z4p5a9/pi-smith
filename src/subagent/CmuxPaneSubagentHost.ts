@@ -1,6 +1,7 @@
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Config, Duration, Effect, Layer, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { isPositiveFiniteDuration } from "../lib/schema.ts";
 import type { SubagentId } from "./SubagentId.ts";
 import {
   SubagentHost,
@@ -14,8 +15,6 @@ import type { SubagentSpec } from "./SubagentSpec.ts";
 const encodeCmuxRpcParams = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
 const CmuxPaneCreateResponse = Schema.Struct({
-  workspace_id: Schema.String.check(Schema.isUUID()),
-  pane_id: Schema.String.check(Schema.isUUID()),
   surface_id: Schema.String.check(Schema.isUUID()),
 });
 
@@ -23,9 +22,15 @@ const decodeCmuxPaneCreateResponse = Schema.decodeUnknownEffect(
   Schema.fromJsonString(CmuxPaneCreateResponse),
 );
 
+const config = Config.schema(
+  Schema.DurationFromString.check(isPositiveFiniteDuration()),
+  "SMITH_CMUX_PANE_CLOSE_TIMEOUT",
+).pipe(Config.withDefault(Duration.seconds(20)));
+
 const make = (root: { readonly workspaceId: string; readonly surfaceId: string }) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const closeTimeout = yield* config;
 
     const rpc = Effect.fn("CmuxPaneSubagentHost.rpc")(function* (
       method: string,
@@ -129,7 +134,8 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       const response = yield* Effect.acquireRelease(
         create(subagentId, command, root.workspaceId, root.surfaceId),
         (pane) =>
-          close(pane.workspace_id, pane.surface_id).pipe(
+          close(root.workspaceId, pane.surface_id).pipe(
+            Effect.timeout(closeTimeout),
             Effect.catch((error) =>
               Effect.logWarning("Failed to close CMUX subagent pane", error).pipe(
                 Effect.annotateLogs({ subagentId, host: "cmux-pane" }),
