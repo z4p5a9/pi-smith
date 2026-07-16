@@ -11,7 +11,10 @@ import {
   Semaphore,
 } from "effect";
 
-import type { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import type {
+  SubagentBridgeDisconnectedError,
+  SubagentBridgeProtocolError,
+} from "./SubagentBridge.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { type SubagentProcess, spawnSubagentProcess } from "./SubagentProcess.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
@@ -27,7 +30,11 @@ export class SubagentAlreadyStartedError extends Schema.TaggedErrorClass<Subagen
 const make = Effect.gen(function* () {
   const supervisorScope = yield* Scope.Scope;
   const registry = yield* SubagentRegistry;
-  const children = yield* FiberMap.make<SubagentId, void, SubagentBridgeDisconnectedError>();
+  const children = yield* FiberMap.make<
+    SubagentId,
+    void,
+    SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
+  >();
   const startLocks = yield* RcMap.make({
     lookup: (_subagentId: SubagentId) => Semaphore.make(1),
   });

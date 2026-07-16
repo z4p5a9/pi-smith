@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { Effect, Fiber, Option, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { SubagentBridge, SubagentBridgeDisconnectedError } from "../subagent/SubagentBridge.ts";
@@ -14,6 +14,9 @@ it.describe("TestSubagentBridge", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const listener = yield* bridge.listen(subagentId);
       const childSession = yield* bridge.connect(subagentId);
+
+      yield* childSession.sendEvent({ kind: "ready" });
+
       const rootSession = yield* listener.accept;
 
       expect(yield* testBridge.isListening(subagentId)).toBe(true);
@@ -59,10 +62,37 @@ it.describe("TestSubagentBridge", () => {
       expect(yield* testBridge.isConnected(subagentId)).toBe(false);
 
       yield* testBridge.unblock(subagentId);
-      yield* Fiber.join(connection);
+      const childSession = yield* Fiber.join(connection);
+
+      yield* childSession.sendEvent({ kind: "ready" });
       yield* listener.accept;
 
       expect(yield* testBridge.isConnected(subagentId)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(TestSubagentBridge.layer)),
+  );
+
+  it.effect("delivers subagent events", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const listener = yield* bridge.listen(subagentId);
+      const childSession = yield* bridge.connect(subagentId);
+
+      yield* childSession.sendEvent({ kind: "ready" });
+
+      const rootSession = yield* listener.accept;
+      const received = yield* rootSession.events.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* childSession.sendEvent({ kind: "message", content: "Task complete." });
+
+      expect(Array.from(yield* Fiber.join(received))).toEqual([
+        { kind: "ready" },
+        { kind: "message", content: "Task complete." },
+      ]);
     }).pipe(Effect.scoped, Effect.provide(TestSubagentBridge.layer)),
   );
 
@@ -76,7 +106,9 @@ it.describe("TestSubagentBridge", () => {
         Effect.gen(function* () {
           const listener = yield* bridge.listen(subagentId);
 
-          yield* bridge.connect(subagentId);
+          const childSession = yield* bridge.connect(subagentId);
+
+          yield* childSession.sendEvent({ kind: "ready" });
           yield* listener.accept;
 
           expect(yield* testBridge.isListening(subagentId)).toBe(true);

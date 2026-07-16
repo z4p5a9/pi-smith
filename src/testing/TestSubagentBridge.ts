@@ -1,12 +1,15 @@
-import { Context, Deferred, Effect, Layer, Ref } from "effect";
+import { Context, Deferred, Effect, Layer, Queue, Ref, Semaphore, Stream } from "effect";
 
 import {
   SubagentBridge,
+  type SubagentBridgeChildSession,
   SubagentBridgeConnectError,
   SubagentBridgeDisconnectedError,
   SubagentBridgeListenError,
-  type SubagentBridgeSession,
+  type SubagentBridgeRootSession,
+  SubagentBridgeSendEventError,
 } from "../subagent/SubagentBridge.ts";
+import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
@@ -14,9 +17,10 @@ const make = Effect.gen(function* () {
     readonly listeners: Map<
       SubagentId,
       {
-        readonly accepted: Deferred.Deferred<SubagentBridgeSession>;
+        readonly accepted: Deferred.Deferred<SubagentBridgeRootSession>;
         readonly connected: boolean;
         readonly closed?: Deferred.Deferred<void>;
+        readonly events?: Queue.Queue<SubagentEvent>;
       }
     >;
     readonly blocked: Map<SubagentId, Deferred.Deferred<void>>;
@@ -31,7 +35,7 @@ const make = Effect.gen(function* () {
   });
 
   const listen = Effect.fn("TestSubagentBridge.listen")(function* (subagentId: SubagentId) {
-    const accepted = yield* Deferred.make<SubagentBridgeSession>();
+    const accepted = yield* Deferred.make<SubagentBridgeRootSession>();
 
     yield* Ref.modify(state, (prev) => {
       if (prev.listeners.has(subagentId)) {
@@ -65,7 +69,7 @@ const make = Effect.gen(function* () {
 
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
-        const closed = yield* Ref.modify(state, (prev) => {
+        const connection = yield* Ref.modify(state, (prev) => {
           const listener = prev.listeners.get(subagentId);
 
           if (listener?.accepted !== accepted) {
@@ -76,11 +80,12 @@ const make = Effect.gen(function* () {
           listeners.delete(subagentId);
           const next = { ...prev, listeners };
 
-          return [listener.closed, next] as const;
+          return [listener, next] as const;
         });
 
-        if (closed !== undefined) {
-          yield* Deferred.succeed(closed, undefined);
+        if (connection?.closed !== undefined && connection.events !== undefined) {
+          yield* Queue.shutdown(connection.events);
+          yield* Deferred.succeed(connection.closed, undefined);
         }
       }),
     );
@@ -103,6 +108,9 @@ const make = Effect.gen(function* () {
     }
 
     const closed = yield* Deferred.make<void>();
+    const events = yield* Queue.bounded<SubagentEvent>(1);
+    const sendLock = yield* Semaphore.make(1);
+    let sessionAccepted = false;
     const accepted = yield* Ref.modify(state, (prev) => {
       const listener = prev.listeners.get(subagentId);
 
@@ -111,7 +119,7 @@ const make = Effect.gen(function* () {
       }
 
       const listeners = new Map(prev.listeners);
-      listeners.set(subagentId, { ...listener, connected: true, closed });
+      listeners.set(subagentId, { ...listener, connected: true, closed, events });
       const next = { ...prev, listeners };
 
       return [listener.accepted, next] as const;
@@ -125,6 +133,7 @@ const make = Effect.gen(function* () {
     }
 
     const rootSession = {
+      events: Stream.fromQueue(events),
       await: Deferred.await(closed).pipe(
         Effect.andThen(
           SubagentBridgeDisconnectedError.make({
@@ -133,8 +142,32 @@ const make = Effect.gen(function* () {
           }),
         ),
       ),
-    } satisfies SubagentBridgeSession;
+    } satisfies SubagentBridgeRootSession;
     const childSession = {
+      sendEvent: Effect.fn("TestSubagentBridge.sendEvent")(
+        function* (event: SubagentEvent) {
+          if (!sessionAccepted) {
+            if (!(yield* Deferred.succeed(accepted, rootSession))) {
+              return yield* SubagentBridgeSendEventError.make({
+                subagentId,
+                reason: "Bridge listener closed before the connection was accepted",
+              });
+            }
+
+            sessionAccepted = true;
+          }
+
+          yield* Queue.offer(events, event);
+          return undefined;
+        },
+        (effect) => sendLock.withPermit(effect),
+        Effect.mapError((error) =>
+          SubagentBridgeSendEventError.make({
+            subagentId,
+            reason: String(error),
+          }),
+        ),
+      ),
       await: Deferred.await(closed).pipe(
         Effect.andThen(
           SubagentBridgeDisconnectedError.make({
@@ -143,16 +176,7 @@ const make = Effect.gen(function* () {
           }),
         ),
       ),
-    } satisfies SubagentBridgeSession;
-
-    if (!(yield* Deferred.succeed(accepted, rootSession))) {
-      yield* Deferred.succeed(closed, undefined);
-
-      return yield* SubagentBridgeConnectError.make({
-        subagentId,
-        reason: "Bridge listener closed before the connection was accepted",
-      });
-    }
+    } satisfies SubagentBridgeChildSession;
 
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
@@ -172,6 +196,7 @@ const make = Effect.gen(function* () {
 
           return next;
         });
+        yield* Queue.shutdown(events);
         yield* Deferred.succeed(closed, undefined);
       }),
     );
@@ -210,7 +235,7 @@ const make = Effect.gen(function* () {
   });
 
   const disconnect = Effect.fn("TestSubagentBridge.disconnect")(function* (subagentId: SubagentId) {
-    const closed = yield* Ref.modify(state, (prev) => {
+    const connection = yield* Ref.modify(state, (prev) => {
       const listener = prev.listeners.get(subagentId);
 
       if (listener?.closed === undefined) {
@@ -224,11 +249,12 @@ const make = Effect.gen(function* () {
       });
       const next = { ...prev, listeners };
 
-      return [listener.closed, next] as const;
+      return [listener, next] as const;
     });
 
-    if (closed !== undefined) {
-      yield* Deferred.succeed(closed, undefined);
+    if (connection?.closed !== undefined && connection.events !== undefined) {
+      yield* Queue.shutdown(connection.events);
+      yield* Deferred.succeed(connection.closed, undefined);
     }
   });
 

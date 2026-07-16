@@ -22,11 +22,14 @@ export default function extension(pi: ExtensionAPI): void {
         const bridge = yield* SubagentBridge;
         const session = yield* bridge.connect(subagentId);
 
+        yield* session.sendEvent({ kind: "ready" });
         yield* session.await.pipe(
-          Effect.catchTag("SubagentBridgeDisconnectedError", (error) =>
-            Effect.logWarning("Subagent bridge disconnected", error).pipe(
-              Effect.annotateLogs({ subagentId }),
-            ),
+          Effect.catchTag(
+            ["SubagentBridgeProtocolError", "SubagentBridgeDisconnectedError"],
+            (error) =>
+              Effect.logWarning("Subagent bridge disconnected", error).pipe(
+                Effect.annotateLogs({ subagentId }),
+              ),
           ),
           Effect.forkScoped,
         );

@@ -1,6 +1,10 @@
 import { Effect, Schema } from "effect";
 
-import { SubagentBridge, type SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import {
+  SubagentBridge,
+  type SubagentBridgeDisconnectedError,
+  type SubagentBridgeProtocolError,
+} from "./SubagentBridge.ts";
 import { SubagentHost } from "./SubagentHost.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { makePiSubagentCommand } from "./PiSubagentHarness.ts";
@@ -9,7 +13,10 @@ import type { SubagentSpec } from "./SubagentSpec.ts";
 export interface SubagentProcess {
   readonly subagentId: SubagentId;
   readonly status: Effect.Effect<"running">;
-  readonly await: Effect.Effect<void, SubagentBridgeDisconnectedError>;
+  readonly await: Effect.Effect<
+    void,
+    SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
+  >;
 }
 
 export class SubagentProcessStartTimeoutError extends Schema.TaggedErrorClass<SubagentProcessStartTimeoutError>()(

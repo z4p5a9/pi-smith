@@ -9,7 +9,7 @@ import { TestSubagentBridge } from "../testing/TestSubagentBridge.ts";
 import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
 
 it.describe("spawnSubagentProcess", () => {
-  it.effect("starts the host after listening and returns after the handshake", () =>
+  it.effect("starts the host after listening and returns after readiness is acknowledged", () =>
     Effect.gen(function* () {
       const testBridge = yield* TestSubagentBridge;
       const testHost = yield* TestSubagentHost;

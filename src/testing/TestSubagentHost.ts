@@ -82,7 +82,12 @@ const make = Effect.gen(function* () {
         }),
     );
 
-    yield* bridge.connect(subagentId).pipe(Effect.forkScoped({ startImmediately: true }));
+    yield* Effect.gen(function* () {
+      const session = yield* bridge.connect(subagentId);
+
+      yield* session.sendEvent({ kind: "ready" });
+      yield* session.await;
+    }).pipe(Effect.orDie, Effect.forkScoped({ startImmediately: true }));
 
     return handle;
   });
