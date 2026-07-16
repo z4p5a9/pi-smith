@@ -1,9 +1,9 @@
 import { NodeFileSystem } from "@effect/platform-node";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Config, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect";
 
-import { SubagentBridge } from "../subagent/SubagentBridge.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
+import { PiSubagentHarness } from "../subagent/PiSubagentHarness.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
@@ -17,30 +17,56 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   const runtime = ManagedRuntime.make(
-    Layer.effectDiscard(
-      Effect.gen(function* () {
-        const bridge = yield* SubagentBridge;
-        const session = yield* bridge.connect(subagentId);
-
-        yield* session.sendEvent({ kind: "ready" });
-        yield* session.await.pipe(
-          Effect.catchTag(
-            ["SubagentBridgeProtocolError", "SubagentBridgeDisconnectedError"],
-            (error) =>
-              Effect.logWarning("Subagent bridge disconnected", error).pipe(
-                Effect.annotateLogs({ subagentId }),
-              ),
-          ),
-          Effect.forkScoped,
-        );
-      }),
-    ).pipe(
-      Layer.provide(SubagentBridge.layer),
+    PiSubagentHarness.layer(subagentId).pipe(
       Layer.provide(unixSocketSubagentBridgeTransportLayer),
       Layer.provide(NodeFileSystem.layer),
     ),
   );
 
   pi.on("session_start", () => runtime.runPromise(Effect.void));
+  pi.on("agent_settled", (_event, ctx) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const harness = yield* PiSubagentHarness;
+        const branch = ctx.sessionManager.getBranch();
+        let entry: SessionEntry | undefined;
+
+        for (let index = branch.length - 1; index >= 0; index--) {
+          const currentEntry = branch[index];
+
+          if (currentEntry?.type === "message" && currentEntry.message.role === "assistant") {
+            entry = currentEntry;
+            break;
+          }
+        }
+
+        if (entry === undefined || entry.type !== "message" || entry.message.role !== "assistant") {
+          yield* harness.sendEvent({
+            kind: "failure",
+            reason: "Pi settled without an assistant response",
+          });
+          return;
+        }
+
+        if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
+          yield* harness.sendEvent({
+            kind: "failure",
+            reason: entry.message.errorMessage ?? `Request ${entry.message.stopReason}`,
+          });
+          return;
+        }
+
+        const content: Array<string> = [];
+
+        for (const block of entry.message.content) {
+          if (block.type === "text") {
+            content.push(block.text);
+          }
+        }
+
+        yield* harness.sendEvent({ kind: "message", content: content.join("\n") });
+      }),
+    ),
+  );
   pi.on("session_shutdown", () => runtime.dispose());
 }

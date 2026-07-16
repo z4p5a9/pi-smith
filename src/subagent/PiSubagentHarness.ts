@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 
-import { Effect, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
+import { SubagentBridge } from "./SubagentBridge.ts";
 import type { SubagentCommand } from "./SubagentHost.ts";
 import type { SubagentId } from "./SubagentId.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
@@ -10,6 +11,33 @@ export class PiSubagentEntrypointUnavailableError extends Schema.TaggedErrorClas
   "PiSubagentEntrypointUnavailableError",
   {},
 ) {}
+
+const make = Effect.fn("PiSubagentHarness.make")(function* (subagentId: SubagentId) {
+  const bridge = yield* SubagentBridge;
+  const session = yield* bridge.connect(subagentId);
+
+  yield* session.sendEvent({ kind: "ready" });
+  yield* session.await.pipe(
+    Effect.catchTag(["SubagentBridgeProtocolError", "SubagentBridgeDisconnectedError"], (error) =>
+      Effect.logWarning("Subagent bridge disconnected", error).pipe(
+        Effect.annotateLogs({ subagentId }),
+      ),
+    ),
+    Effect.forkScoped,
+  );
+
+  return { sendEvent: session.sendEvent };
+});
+
+export class PiSubagentHarness extends Context.Service<PiSubagentHarness>()(
+  "@smith/subagent/PiSubagentHarness",
+  { make },
+) {
+  static readonly layer = (subagentId: SubagentId) =>
+    Layer.effect(PiSubagentHarness, PiSubagentHarness.make(subagentId)).pipe(
+      Layer.provide(SubagentBridge.layer),
+    );
+}
 
 export const makePiSubagentCommand = Effect.fn("makePiSubagentCommand")(function* (
   subagentId: SubagentId,
