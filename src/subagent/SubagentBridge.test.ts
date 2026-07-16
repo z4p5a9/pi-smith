@@ -9,11 +9,11 @@ import {
 } from "./SubagentBridge.ts";
 import { maxSubagentBridgeHandshakeBytes } from "./SubagentBridgeProtocol.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
-import { layer as unixSocketSubagentBridgeLayer } from "./UnixSocketSubagentBridge.ts";
+import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSubagentBridgeTransport.ts";
 
 const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
-it.describe("UnixSocketSubagentBridge", () => {
+it.describe("SubagentBridge", () => {
   it.effect("connects a subagent bridge session", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
@@ -26,7 +26,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       expect(root).toHaveProperty("await");
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -55,7 +60,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       expect(root).toHaveProperty("await");
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -87,7 +97,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       expect(root).toHaveProperty("await");
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -115,7 +130,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       expect(root).toHaveProperty("await");
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -134,7 +154,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -146,7 +171,12 @@ it.describe("UnixSocketSubagentBridge", () => {
       yield* bridge.listen(subagentId).pipe(Effect.scoped);
       yield* bridge.listen(subagentId).pipe(Effect.scoped);
     }).pipe(
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 
@@ -158,7 +188,12 @@ it.describe("UnixSocketSubagentBridge", () => {
 
       expect(Schema.is(SubagentBridgeConnectError)(error)).toBe(true);
     }).pipe(
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
     ),
   );
 });

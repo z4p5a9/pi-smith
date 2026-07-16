@@ -7,7 +7,7 @@ import { Effect, Layer, Schema } from "effect";
 
 import { SubagentBridge, SubagentBridgeDisconnectedError } from "../subagent/SubagentBridge.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
-import { layer as unixSocketSubagentBridgeLayer } from "../subagent/UnixSocketSubagentBridge.ts";
+import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
 it.describe("Pi subagent extension", () => {
   it.effect("connects and closes a subagent bridge session", () => {
@@ -41,7 +41,12 @@ it.describe("Pi subagent extension", () => {
       expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
     }).pipe(
       Effect.scoped,
-      Effect.provide(unixSocketSubagentBridgeLayer.pipe(Layer.provideMerge(NodeFileSystem.layer))),
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });

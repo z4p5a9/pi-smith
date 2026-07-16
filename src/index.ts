@@ -4,10 +4,11 @@ import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Option, Schema }
 import { Type } from "typebox";
 
 import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
+import { SubagentBridge } from "./subagent/SubagentBridge.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
-import { layer as unixSocketSubagentBridgeLayer } from "./subagent/UnixSocketSubagentBridge.ts";
+import { layer as unixSocketSubagentBridgeTransportLayer } from "./subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const childMarker = Effect.runSync(
@@ -38,7 +39,8 @@ export default function extension(pi: ExtensionAPI): void {
   const runtime = ManagedRuntime.make(
     SubagentPool.layer.pipe(
       Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
-      Layer.provide(unixSocketSubagentBridgeLayer),
+      Layer.provide(SubagentBridge.layer),
+      Layer.provide(unixSocketSubagentBridgeTransportLayer),
       Layer.provide(NodeChildProcessSpawner.layer),
       Layer.provide(NodeFileSystem.layer),
       Layer.provide(NodePath.layer),

@@ -4,7 +4,7 @@ import { Config, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect";
 
 import { SubagentBridge } from "../subagent/SubagentBridge.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
-import { layer as unixSocketSubagentBridgeLayer } from "../subagent/UnixSocketSubagentBridge.ts";
+import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const subagentId = Effect.runSync(
@@ -31,7 +31,11 @@ export default function extension(pi: ExtensionAPI): void {
           Effect.forkScoped,
         );
       }),
-    ).pipe(Layer.provide(unixSocketSubagentBridgeLayer), Layer.provide(NodeFileSystem.layer)),
+    ).pipe(
+      Layer.provide(SubagentBridge.layer),
+      Layer.provide(unixSocketSubagentBridgeTransportLayer),
+      Layer.provide(NodeFileSystem.layer),
+    ),
   );
 
   pi.on("session_start", () => runtime.runPromise(Effect.void));
