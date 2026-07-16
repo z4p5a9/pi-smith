@@ -14,10 +14,17 @@ it.describe("TestSubagentBridge", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const listener = yield* bridge.listen(subagentId);
       const childSession = yield* bridge.connect(subagentId);
-
-      yield* childSession.sendEvent({ kind: "ready" });
-
+      const sending = yield* childSession
+        .sendEvent({ kind: "ready" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
       const rootSession = yield* listener.accept;
+      const delivery = yield* rootSession.events.pipe(
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+
+      yield* delivery.acknowledge;
+      yield* Fiber.join(sending);
 
       expect(yield* testBridge.isListening(subagentId)).toBe(true);
       expect(yield* testBridge.isConnected(subagentId)).toBe(true);
@@ -63,9 +70,17 @@ it.describe("TestSubagentBridge", () => {
 
       yield* testBridge.unblock(subagentId);
       const childSession = yield* Fiber.join(connection);
+      const sending = yield* childSession
+        .sendEvent({ kind: "ready" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const rootSession = yield* listener.accept;
+      const delivery = yield* rootSession.events.pipe(
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
 
-      yield* childSession.sendEvent({ kind: "ready" });
-      yield* listener.accept;
+      yield* delivery.acknowledge;
+      yield* Fiber.join(sending);
 
       expect(yield* testBridge.isConnected(subagentId)).toBe(true);
     }).pipe(Effect.scoped, Effect.provide(TestSubagentBridge.layer)),
@@ -73,21 +88,25 @@ it.describe("TestSubagentBridge", () => {
 
   it.effect("delivers subagent events", () =>
     Effect.gen(function* () {
+      const testBridge = yield* TestSubagentBridge;
       const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const listener = yield* bridge.listen(subagentId);
       const childSession = yield* bridge.connect(subagentId);
 
-      yield* childSession.sendEvent({ kind: "ready" });
-
+      const ready = yield* childSession
+        .sendEvent({ kind: "ready" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
       const rootSession = yield* listener.accept;
       const received = yield* rootSession.events.pipe(
         Stream.take(2),
+        Stream.mapEffect((delivery) => delivery.acknowledge.pipe(Effect.as(delivery.event))),
         Stream.runCollect,
         Effect.forkChild({ startImmediately: true }),
       );
 
-      yield* childSession.sendEvent({ kind: "message", content: "Task complete." });
+      yield* Fiber.join(ready);
+      yield* testBridge.sendEvent(subagentId, { kind: "message", content: "Task complete." });
 
       expect(Array.from(yield* Fiber.join(received))).toEqual([
         { kind: "ready" },
@@ -105,11 +124,18 @@ it.describe("TestSubagentBridge", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const listener = yield* bridge.listen(subagentId);
-
           const childSession = yield* bridge.connect(subagentId);
+          const sending = yield* childSession
+            .sendEvent({ kind: "ready" })
+            .pipe(Effect.forkChild({ startImmediately: true }));
+          const rootSession = yield* listener.accept;
+          const delivery = yield* rootSession.events.pipe(
+            Stream.runHead,
+            Effect.flatMap(Effect.fromOption),
+          );
 
-          yield* childSession.sendEvent({ kind: "ready" });
-          yield* listener.accept;
+          yield* delivery.acknowledge;
+          yield* Fiber.join(sending);
 
           expect(yield* testBridge.isListening(subagentId)).toBe(true);
           expect(yield* testBridge.isConnected(subagentId)).toBe(true);

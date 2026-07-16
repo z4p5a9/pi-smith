@@ -8,6 +8,7 @@ import {
   SubagentBridgeListenError,
   type SubagentBridgeRootSession,
   SubagentBridgeSendEventError,
+  type SubagentEventDelivery,
 } from "../subagent/SubagentBridge.ts";
 import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
@@ -20,7 +21,7 @@ const make = Effect.gen(function* () {
         readonly accepted: Deferred.Deferred<SubagentBridgeRootSession>;
         readonly connected: boolean;
         readonly closed?: Deferred.Deferred<void>;
-        readonly events?: Queue.Queue<SubagentEvent>;
+        readonly events?: Queue.Queue<SubagentEventDelivery>;
       }
     >;
     readonly blocked: Map<SubagentId, Deferred.Deferred<void>>;
@@ -108,7 +109,7 @@ const make = Effect.gen(function* () {
     }
 
     const closed = yield* Deferred.make<void>();
-    const events = yield* Queue.bounded<SubagentEvent>(1);
+    const events = yield* Queue.bounded<SubagentEventDelivery>(1);
     const sendLock = yield* Semaphore.make(1);
     let sessionAccepted = false;
     const accepted = yield* Ref.modify(state, (prev) => {
@@ -157,7 +158,13 @@ const make = Effect.gen(function* () {
             sessionAccepted = true;
           }
 
-          yield* Queue.offer(events, event);
+          const acknowledged = yield* Deferred.make<void>();
+
+          yield* Queue.offer(events, {
+            event,
+            acknowledge: Deferred.succeed(acknowledged, undefined).pipe(Effect.asVoid),
+          });
+          yield* Deferred.await(acknowledged);
           return undefined;
         },
         (effect) => sendLock.withPermit(effect),
@@ -258,6 +265,27 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const sendEvent = Effect.fn("TestSubagentBridge.sendEvent")(function* (
+    subagentId: SubagentId,
+    event: SubagentEvent,
+  ) {
+    const ref = yield* Ref.get(state);
+    const events = ref.listeners.get(subagentId)?.events;
+
+    if (events === undefined) {
+      return yield* Effect.die(`No connected test subagent bridge exists for ${subagentId}`);
+    }
+
+    const acknowledged = yield* Deferred.make<void>();
+
+    yield* Queue.offer(events, {
+      event,
+      acknowledge: Deferred.succeed(acknowledged, undefined).pipe(Effect.asVoid),
+    });
+    yield* Deferred.await(acknowledged);
+    return undefined;
+  });
+
   const isListening = Effect.fn("TestSubagentBridge.isListening")(function* (
     subagentId: SubagentId,
   ) {
@@ -286,6 +314,7 @@ const make = Effect.gen(function* () {
     block,
     unblock,
     disconnect,
+    sendEvent,
     isListening,
     isConnected,
     calls,

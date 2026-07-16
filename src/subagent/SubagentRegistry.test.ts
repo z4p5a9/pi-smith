@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 
 import { decodeSubagentId } from "./SubagentId.ts";
 import type { SubagentProcess } from "./SubagentProcess.ts";
@@ -17,6 +17,7 @@ it.describe("SubagentRegistry", () => {
       const process = {
         subagentId,
         status: Effect.succeed("running" as const),
+        events: Stream.never,
         await: Effect.never,
       } satisfies SubagentProcess;
 
@@ -33,6 +34,7 @@ it.describe("SubagentRegistry", () => {
       const process = {
         subagentId,
         status: Effect.succeed("running" as const),
+        events: Stream.never,
         await: Effect.never,
       } satisfies SubagentProcess;
 
@@ -62,6 +64,7 @@ it.describe("SubagentRegistry", () => {
       const process = {
         subagentId,
         status: Effect.succeed("running" as const),
+        events: Stream.never,
         await: Effect.never,
       } satisfies SubagentProcess;
 

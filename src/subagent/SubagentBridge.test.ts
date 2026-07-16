@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodeSocket, NodeSocketServer } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 import * as Socket from "effect/unstable/socket/Socket";
 
 import {
@@ -22,12 +22,19 @@ it.describe("SubagentBridge", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-connect");
       const listener = yield* bridge.listen(subagentId);
       const child = yield* bridge.connect(subagentId);
+      const sent = yield* Deferred.make<void>();
       const delivery = yield* child
         .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+        .pipe(
+          Effect.andThen(Deferred.succeed(sent, undefined)),
+          Effect.forkChild({ startImmediately: true }),
+        );
       const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(yield* root.events.pipe(Stream.runHead)).toEqual(Option.some({ kind: "ready" }));
+      expect(received.event).toEqual({ kind: "ready" });
+      expect(yield* Deferred.isDone(sent)).toBe(false);
+      yield* received.acknowledge;
       yield* Fiber.join(delivery);
     }).pipe(
       Effect.scoped,
@@ -52,6 +59,7 @@ it.describe("SubagentBridge", () => {
       const root = yield* listener.accept;
       const received = yield* root.events.pipe(
         Stream.take(3),
+        Stream.mapEffect((delivery) => delivery.acknowledge.pipe(Effect.as(delivery.event))),
         Stream.runCollect,
         Effect.forkChild({ startImmediately: true }),
       );
@@ -88,6 +96,7 @@ it.describe("SubagentBridge", () => {
       const root = yield* listener.accept;
       const received = yield* root.events.pipe(
         Stream.take(3),
+        Stream.mapEffect((delivery) => delivery.acknowledge.pipe(Effect.as(delivery.event))),
         Stream.runCollect,
         Effect.forkChild({ startImmediately: true }),
       );
@@ -137,7 +146,10 @@ it.describe("SubagentBridge", () => {
         .sendEvent({ kind: "ready" })
         .pipe(Effect.forkChild({ startImmediately: true }));
 
-      yield* listener.accept;
+      const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
       yield* Fiber.join(delivery);
     }).pipe(
       Effect.scoped,
@@ -178,7 +190,10 @@ it.describe("SubagentBridge", () => {
         .sendEvent({ kind: "ready" })
         .pipe(Effect.forkChild({ startImmediately: true }));
 
-      yield* listener.accept;
+      const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
       yield* Fiber.join(delivery);
     }).pipe(
       Effect.scoped,
@@ -213,7 +228,10 @@ it.describe("SubagentBridge", () => {
         .sendEvent({ kind: "ready" })
         .pipe(Effect.forkChild({ startImmediately: true }));
 
-      yield* listener.accept;
+      const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
       yield* Fiber.join(delivery);
     }).pipe(
       Effect.scoped,
@@ -253,6 +271,9 @@ it.describe("SubagentBridge", () => {
         .pipe(Effect.forkScoped);
 
       const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
       yield* write(`${malformed}\n`);
       const error = yield* root.await.pipe(Effect.flip);
 
@@ -278,7 +299,10 @@ it.describe("SubagentBridge", () => {
         .sendEvent({ kind: "ready" })
         .pipe(Effect.forkChild({ startImmediately: true }));
 
-      yield* listener.accept;
+      const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
       yield* Fiber.join(ready);
 
       const error = yield* child
@@ -358,7 +382,9 @@ it.describe("SubagentBridge", () => {
         .sendEvent({ kind: "ready" })
         .pipe(Effect.forkChild({ startImmediately: true }));
       const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
+      yield* received.acknowledge;
       yield* Fiber.join(ready);
       yield* Scope.close(childScope, Exit.void);
 

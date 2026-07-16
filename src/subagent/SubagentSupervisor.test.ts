@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Schema } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { TestSubagentBridge } from "../testing/TestSubagentBridge.ts";
@@ -84,6 +84,54 @@ it.describe("SubagentSupervisor", () => {
       const process = yield* registry.get(subagentId);
 
       expect(yield* process.status).toBe("running");
+      yield* testHost.verify;
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          SubagentSupervisor.layer,
+          TestSubagentHost.layer.pipe(Layer.provideMerge(TestSubagentBridge.layer)),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("forwards acknowledged events independently from the child scope", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* SubagentSupervisor;
+      const testBridge = yield* TestSubagentBridge;
+      const testHost = yield* TestSubagentHost;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const processMessage = yield* Deferred.make<void>();
+      const received = yield* supervisor.events.pipe(
+        Stream.take(2),
+        Stream.mapEffect((event) =>
+          event.event.kind === "message"
+            ? Deferred.await(processMessage).pipe(Effect.as(event))
+            : Effect.succeed(event),
+        ),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* testHost.stub([{ hostId: "test-host" }]);
+
+      const child = yield* supervisor.start(subagentId, {
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+      });
+
+      yield* testBridge.sendEvent(subagentId, { kind: "message", content: "Task complete." });
+      yield* testBridge.disconnect(subagentId);
+      yield* Deferred.succeed(processMessage, undefined);
+
+      expect(Array.from(yield* Fiber.join(received))).toEqual([
+        { subagentId, event: { kind: "ready" } },
+        { subagentId, event: { kind: "message", content: "Task complete." } },
+      ]);
+      expect(Schema.is(SubagentBridgeDisconnectedError)(yield* child.await.pipe(Effect.flip))).toBe(
+        true,
+      );
       yield* testHost.verify;
     }).pipe(
       Effect.provide(

@@ -1,9 +1,10 @@
-import { Effect, Schema } from "effect";
+import { Effect, Schema, type Stream } from "effect";
 
 import {
   SubagentBridge,
   type SubagentBridgeDisconnectedError,
   type SubagentBridgeProtocolError,
+  type SubagentEventDelivery,
 } from "./SubagentBridge.ts";
 import { SubagentHost } from "./SubagentHost.ts";
 import { SubagentId } from "./SubagentId.ts";
@@ -13,6 +14,7 @@ import type { SubagentSpec } from "./SubagentSpec.ts";
 export interface SubagentProcess {
   readonly subagentId: SubagentId;
   readonly status: Effect.Effect<"running">;
+  readonly events: Stream.Stream<SubagentEventDelivery>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
@@ -42,6 +44,7 @@ export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(
     return {
       subagentId,
       status: Effect.succeed("running" as const),
+      events: session.events,
       await: session.await,
     } satisfies SubagentProcess;
   },

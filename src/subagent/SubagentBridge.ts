@@ -15,11 +15,16 @@ import type { SubagentEvent } from "./SubagentEvent.ts";
 import { SubagentId } from "./SubagentId.ts";
 
 export interface SubagentBridgeRootSession {
-  readonly events: Stream.Stream<SubagentEvent>;
+  readonly events: Stream.Stream<SubagentEventDelivery>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
   >;
+}
+
+export interface SubagentEventDelivery {
+  readonly event: SubagentEvent;
+  readonly acknowledge: Effect.Effect<void>;
 }
 
 export interface SubagentBridgeChildSession {
@@ -86,7 +91,7 @@ const make = Effect.gen(function* () {
     const runConnection = Effect.fn("SubagentBridge.runConnection")(function* (
       socket: Socket.Socket,
     ) {
-      const events = yield* Queue.bounded<SubagentEvent>(1);
+      const events = yield* Queue.bounded<SubagentEventDelivery>(1);
       const outgoingBytes = yield* Queue.bounded<Uint8Array>(0);
       const lifetime = yield* Deferred.make<
         void,
@@ -146,7 +151,13 @@ const make = Effect.gen(function* () {
               connection.accepted = true;
             }
 
-            yield* Queue.offer(events, frame.event);
+            const acknowledged = yield* Deferred.make<void>();
+
+            yield* Queue.offer(events, {
+              event: frame.event,
+              acknowledge: Deferred.succeed(acknowledged, undefined).pipe(Effect.asVoid),
+            });
+            yield* Deferred.await(acknowledged);
 
             const acknowledgement = yield* encodeSubagentBridgeAcknowledgementFrame({
               kind: "ack",

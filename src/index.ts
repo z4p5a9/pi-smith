@@ -1,6 +1,15 @@
 import { NodeChildProcessSpawner, NodeFileSystem, NodePath } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
+import {
+  Config,
+  ConfigProvider,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Schema,
+  Stream,
+} from "effect";
 import { Type } from "typebox";
 
 import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
@@ -8,6 +17,7 @@ import { SubagentBridge } from "./subagent/SubagentBridge.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
+import { SubagentSupervisor } from "./subagent/SubagentSupervisor.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "./subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
@@ -47,7 +57,58 @@ export default function extension(pi: ExtensionAPI): void {
     ),
   );
 
-  pi.on("session_shutdown", () => runtime.dispose());
+  pi.on("session_start", (_event, ctx) => {
+    runtime.runFork(
+      Effect.gen(function* () {
+        const supervisor = yield* SubagentSupervisor;
+
+        yield* supervisor.events.pipe(
+          Stream.runForEach(({ event, subagentId }) => {
+            if (event.kind === "ready") {
+              return Effect.void;
+            }
+
+            return Effect.try(() => {
+              pi.sendMessage(
+                {
+                  customType: "smith-subagent",
+                  content:
+                    event.kind === "message"
+                      ? `Subagent ${subagentId} sent a message:\n\n${event.content}`
+                      : `Subagent ${subagentId} failed:\n\n${event.reason}`,
+                  display: false,
+                  details: { subagentId, event },
+                },
+                {
+                  deliverAs: "followUp",
+                  triggerTurn: true,
+                },
+              );
+
+              if (ctx.hasUI) {
+                ctx.ui.notify(
+                  event.kind === "message"
+                    ? `Received a message from subagent ${subagentId}`
+                    : `Subagent ${subagentId} failed`,
+                  event.kind === "message" ? "info" : "error",
+                );
+              }
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logError("Failed to deliver subagent event to root Pi", error).pipe(
+                  Effect.annotateLogs({ subagentId }),
+                ),
+              ),
+            );
+          }),
+        );
+      }),
+    );
+  });
+
+  pi.on("session_shutdown", () => {
+    return runtime.dispose();
+  });
 
   pi.registerTool({
     name: "subagent",

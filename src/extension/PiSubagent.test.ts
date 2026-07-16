@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Fiber, Layer, Schema, Stream } from "effect";
 
 import { SubagentBridge, SubagentBridgeDisconnectedError } from "../subagent/SubagentBridge.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
@@ -27,8 +27,14 @@ it.describe("Pi subagent extension", () => {
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
 
-      yield* Effect.promise(() => start());
+      const starting = yield* Effect.promise(() => start()).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
       const session = yield* listener.accept;
+      const ready = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* ready.acknowledge;
+      yield* Fiber.join(starting);
 
       expect(result.errors).toEqual([]);
       expect(loaded.tools.size).toBe(0);

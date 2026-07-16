@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
 import { SubagentBridge } from "../subagent/SubagentBridge.ts";
 import { SubagentHost, SubagentHostUnavailableError } from "../subagent/SubagentHost.ts";
@@ -32,7 +32,13 @@ it.describe("TestSubagentHost", () => {
             },
           );
 
-          yield* listener.accept;
+          const session = yield* listener.accept;
+          const delivery = yield* session.events.pipe(
+            Stream.runHead,
+            Effect.flatMap(Effect.fromOption),
+          );
+
+          yield* delivery.acknowledge;
 
           expect(handle).toEqual({ hostId: "test-host" });
           expect(yield* testHost.active).toEqual([{ hostId: "test-host" }]);

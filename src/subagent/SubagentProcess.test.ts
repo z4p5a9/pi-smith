@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Schema } from "effect";
+import { Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
@@ -22,12 +22,16 @@ it.describe("spawnSubagentProcess", () => {
         prompt: "Complete the task.",
         cwd: "/worktree",
       });
+      const ready = yield* process.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       expect(yield* process.status).toBe("running");
+      expect(ready.event).toEqual({ kind: "ready" });
       expect(yield* testBridge.calls).toEqual([
         { operation: "listen", subagentId },
         { operation: "connect", subagentId },
       ]);
+
+      yield* ready.acknowledge;
 
       yield* testBridge.disconnect(subagentId);
 

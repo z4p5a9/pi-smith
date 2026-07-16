@@ -5,16 +5,19 @@ import {
   Fiber,
   FiberMap,
   Layer,
+  PubSub,
   RcMap,
   Schema,
   Scope,
   Semaphore,
+  Stream,
 } from "effect";
 
 import type {
   SubagentBridgeDisconnectedError,
   SubagentBridgeProtocolError,
 } from "./SubagentBridge.ts";
+import type { SubagentEvent } from "./SubagentEvent.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { type SubagentProcess, spawnSubagentProcess } from "./SubagentProcess.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
@@ -30,6 +33,10 @@ export class SubagentAlreadyStartedError extends Schema.TaggedErrorClass<Subagen
 const make = Effect.gen(function* () {
   const supervisorScope = yield* Scope.Scope;
   const registry = yield* SubagentRegistry;
+  const eventPubSub = yield* PubSub.bounded<{
+    readonly subagentId: SubagentId;
+    readonly event: SubagentEvent;
+  }>(1);
   const children = yield* FiberMap.make<
     SubagentId,
     void,
@@ -38,6 +45,8 @@ const make = Effect.gen(function* () {
   const startLocks = yield* RcMap.make({
     lookup: (_subagentId: SubagentId) => Semaphore.make(1),
   });
+
+  yield* Effect.addFinalizer(() => PubSub.shutdown(eventPubSub));
 
   const supervise = Effect.fn("SubagentSupervisor.supervise")(function* (
     process: SubagentProcess,
@@ -49,6 +58,23 @@ const make = Effect.gen(function* () {
     yield* Effect.acquireRelease(registry.register(process), () =>
       registry.unregister(subagentId),
     ).pipe(Scope.provide(childScope));
+
+    yield* process.events.pipe(
+      Stream.runForEach((delivery) =>
+        Effect.gen(function* () {
+          const published = yield* PubSub.publish(eventPubSub, {
+            subagentId,
+            event: delivery.event,
+          });
+
+          if (published) {
+            yield* delivery.acknowledge;
+          }
+        }),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+      Scope.provide(childScope),
+    );
 
     const fiber = yield* FiberMap.run(
       children,
@@ -97,7 +123,7 @@ const make = Effect.gen(function* () {
       ).pipe(Effect.uninterruptible),
   );
 
-  return { start };
+  return { start, events: Stream.fromPubSub(eventPubSub) };
 });
 
 export class SubagentSupervisor extends Context.Service<SubagentSupervisor>()(
