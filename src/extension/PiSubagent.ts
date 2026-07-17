@@ -45,28 +45,42 @@ export default function extension(pi: ExtensionAPI): void {
             kind: "failure",
             reason: "Pi settled without an assistant response",
           });
-          return;
-        }
-
-        if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
+        } else if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
           yield* harness.sendEvent({
             kind: "failure",
             reason: entry.message.errorMessage ?? `Request ${entry.message.stopReason}`,
           });
-          return;
-        }
+        } else {
+          const content: Array<string> = [];
 
-        const content: Array<string> = [];
-
-        for (const block of entry.message.content) {
-          if (block.type === "text") {
-            content.push(block.text);
+          for (const block of entry.message.content) {
+            if (block.type === "text") {
+              content.push(block.text);
+            }
           }
-        }
 
-        yield* harness.sendEvent({ kind: "message", content: content.join("\n") });
-      }),
+          yield* harness.sendEvent({ kind: "message", content: content.join("\n") });
+        }
+      }).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            ctx.shutdown();
+          }),
+        ),
+      ),
     ),
   );
-  pi.on("session_shutdown", () => runtime.dispose());
+  pi.on("session_shutdown", () =>
+    Effect.runPromise(
+      Effect.promise(() =>
+        runtime.runPromiseExit(
+          Effect.gen(function* () {
+            const harness = yield* PiSubagentHarness;
+
+            yield* harness.close;
+          }),
+        ),
+      ).pipe(Effect.ensuring(Effect.promise(() => runtime.dispose())), Effect.flatten),
+    ),
+  );
 }

@@ -26,7 +26,7 @@ const make = Effect.fn("PiSubagentHarness.make")(function* (subagentId: Subagent
     Effect.forkScoped,
   );
 
-  return { sendEvent: session.sendEvent };
+  return { sendEvent: session.sendEvent, close: session.close };
 });
 
 export class PiSubagentHarness extends Context.Service<PiSubagentHarness>()(
