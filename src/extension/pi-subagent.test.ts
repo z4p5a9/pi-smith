@@ -5,7 +5,7 @@ import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-co
 import { expect, it, vi } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
-import * as SubagentBridge from "../subagent/SubagentBridge.ts";
+import { SubagentBridge } from "../subagent/SubagentBridge.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
@@ -14,8 +14,9 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -90,7 +91,10 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -100,8 +104,9 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -151,7 +156,10 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -161,8 +169,9 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -227,7 +236,10 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -237,8 +249,9 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -302,7 +315,10 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );

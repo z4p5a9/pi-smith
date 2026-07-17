@@ -1,14 +1,12 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Context, Effect, Layer, Scope } from "effect";
 
-import * as SubagentBridge from "../../subagent/SubagentBridge.ts";
-import type { SubagentBridgeChildSession } from "../../subagent/SubagentBridge.ts";
-import { SubagentBridgeTransport } from "../../subagent/SubagentBridgeTransport.ts";
+import { SubagentBridge, type SubagentBridgeChildSession } from "../../subagent/SubagentBridge.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 
 const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId) {
   const scope = yield* Scope.Scope;
-  const transport = yield* SubagentBridgeTransport;
+  const bridge = yield* SubagentBridge;
   let session: SubagentBridgeChildSession | undefined;
 
   const start = Effect.gen(function* () {
@@ -16,10 +14,7 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
       return yield* Effect.void;
     }
 
-    session = yield* SubagentBridge.connect(subagentId).pipe(
-      Effect.provideService(SubagentBridgeTransport, transport),
-      Scope.provide(scope),
-    );
+    session = yield* bridge.connect(subagentId).pipe(Scope.provide(scope));
     return yield* Effect.void;
   }).pipe(Effect.withSpan("PiChildSession.start"));
 

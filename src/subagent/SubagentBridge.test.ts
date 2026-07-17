@@ -2,8 +2,8 @@ import { NodeFileSystem, NodeSocket } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 
-import * as SubagentBridge from "./SubagentBridge.ts";
 import {
+  SubagentBridge,
   SubagentBridgeDisconnectedError,
   SubagentBridgeProtocolError,
   SubagentBridgeSendEventError,
@@ -17,11 +17,12 @@ const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 it.describe("SubagentBridge", () => {
   it.effect("accepts hello before delivering one acknowledged event and closing", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-connect");
-      const listener = yield* SubagentBridge.listen(subagentId);
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const listener = yield* bridge.listen(subagentId);
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       const root = yield* listener.accept;
       const child = yield* Fiber.join(connecting);
       const sent = yield* Deferred.make<void>();
@@ -43,15 +44,19 @@ it.describe("SubagentBridge", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects an event before hello without poisoning the listener", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-event-first");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
@@ -68,23 +73,27 @@ it.describe("SubagentBridge", () => {
 
       yield* Fiber.await(invalidConnection);
 
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       yield* listener.accept;
       yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects a wrong protocol version without poisoning the listener", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-version");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
@@ -96,24 +105,28 @@ it.describe("SubagentBridge", () => {
 
       yield* Fiber.await(invalidConnection);
 
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       yield* listener.accept;
       yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects a wrong subagent ID without poisoning the listener", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-identity");
       const otherSubagentId = yield* decodeSubagentId("sa_87654321_other-subagent");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
@@ -129,23 +142,27 @@ it.describe("SubagentBridge", () => {
 
       yield* Fiber.await(invalidConnection);
 
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       yield* listener.accept;
       yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects malformed data without poisoning the listener", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-malformed");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
@@ -156,23 +173,27 @@ it.describe("SubagentBridge", () => {
 
       yield* Fiber.await(invalidConnection);
 
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       yield* listener.accept;
       yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects an oversized frame without poisoning the listener", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-oversized");
-      const listener = yield* SubagentBridge.listen(subagentId);
+      const listener = yield* bridge.listen(subagentId);
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
@@ -185,26 +206,30 @@ it.describe("SubagentBridge", () => {
 
       yield* Fiber.await(invalidConnection);
 
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       yield* listener.accept;
       yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("fails the session on a second event", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-second-event");
-      const listener = yield* SubagentBridge.listen(subagentId);
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const listener = yield* bridge.listen(subagentId);
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       const root = yield* listener.accept;
       const child = yield* Fiber.join(connecting);
       const first = yield* child
@@ -225,18 +250,22 @@ it.describe("SubagentBridge", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("rejects an oversized event before sending it", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-large-send");
-      const listener = yield* SubagentBridge.listen(subagentId);
-      const connecting = yield* SubagentBridge.connect(subagentId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const listener = yield* bridge.listen(subagentId);
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
 
       yield* listener.accept;
 
@@ -249,20 +278,23 @@ it.describe("SubagentBridge", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("distinguishes unexpected EOF from graceful close", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const disconnectedId = yield* decodeSubagentId("sa_12345678_bridge-disconnect");
-      const disconnectedListener = yield* SubagentBridge.listen(disconnectedId);
+      const disconnectedListener = yield* bridge.listen(disconnectedId);
       const childScope = yield* Scope.make();
-      const connecting = yield* SubagentBridge.connect(disconnectedId).pipe(
-        Scope.provide(childScope),
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const connecting = yield* bridge
+        .connect(disconnectedId)
+        .pipe(Scope.provide(childScope), Effect.forkChild({ startImmediately: true }));
       const disconnectedRoot = yield* disconnectedListener.accept;
 
       yield* Fiber.join(connecting);
@@ -273,10 +305,10 @@ it.describe("SubagentBridge", () => {
       ).toBe(true);
 
       const closedId = yield* decodeSubagentId("sa_87654321_bridge-close");
-      const closedListener = yield* SubagentBridge.listen(closedId);
-      const closedConnecting = yield* SubagentBridge.connect(closedId).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const closedListener = yield* bridge.listen(closedId);
+      const closedConnecting = yield* bridge
+        .connect(closedId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
       const closedRoot = yield* closedListener.accept;
       const closedChild = yield* Fiber.join(closedConnecting);
 
@@ -285,34 +317,45 @@ it.describe("SubagentBridge", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("removes the socket when its scope closes", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-cleanup");
 
-      yield* SubagentBridge.listen(subagentId).pipe(Effect.scoped);
-      yield* SubagentBridge.listen(subagentId).pipe(Effect.scoped);
+      yield* bridge.listen(subagentId).pipe(Effect.scoped);
+      yield* bridge.listen(subagentId).pipe(Effect.scoped);
     }).pipe(
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );
 
   it.effect("reports a missing listener while connecting", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-missing");
-      const error = yield* SubagentBridge.connect(subagentId).pipe(Effect.flip);
+      const error = yield* bridge.connect(subagentId).pipe(Effect.flip);
 
       expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
       ),
     ),
   );

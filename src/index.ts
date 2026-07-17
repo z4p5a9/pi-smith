@@ -13,6 +13,7 @@ import {
 import { Type } from "typebox";
 
 import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
+import { SubagentBridge } from "./subagent/SubagentBridge.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
@@ -48,6 +49,7 @@ export default function extension(pi: ExtensionAPI): void {
   const runtime = ManagedRuntime.make(
     SubagentPool.layer.pipe(
       Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
+      Layer.provide(SubagentBridge.layer),
       Layer.provide(unixSocketSubagentBridgeTransportLayer),
       Layer.provide(NodeChildProcessSpawner.layer),
       Layer.provide(NodeFileSystem.layer),

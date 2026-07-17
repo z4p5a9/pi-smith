@@ -3,8 +3,7 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 
-import * as SubagentBridge from "./SubagentBridge.ts";
-import { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import { SubagentBridge, SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { spawnSubagentProcess, SubagentProcessStartTimeoutError } from "./SubagentProcess.ts";
 import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
@@ -13,6 +12,7 @@ import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSub
 it.describe("spawnSubagentProcess", () => {
   it.effect("starts the host after listening and returns after hello is acknowledged", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-start");
       const parentScope = yield* Scope.Scope;
@@ -28,7 +28,7 @@ it.describe("spawnSubagentProcess", () => {
       expect(yield* testHost.takeStart).toBe(subagentId);
 
       const childScope = yield* Scope.fork(parentScope);
-      yield* SubagentBridge.connect(subagentId).pipe(Scope.provide(childScope));
+      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
       const process = yield* Fiber.join(started);
 
       expect(yield* process.status).toBe("running");
@@ -42,9 +42,9 @@ it.describe("spawnSubagentProcess", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.merge(
-          TestSubagentHost.layer,
-          unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        Layer.merge(TestSubagentHost.layer, SubagentBridge.layer).pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
@@ -52,6 +52,7 @@ it.describe("spawnSubagentProcess", () => {
 
   it.effect("times out and releases acquired resources", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-timeout");
 
@@ -70,13 +71,13 @@ it.describe("spawnSubagentProcess", () => {
 
       expect(Schema.is(SubagentProcessStartTimeoutError)(error)).toBe(true);
       expect(yield* testHost.active).toEqual([]);
-      yield* SubagentBridge.listen(subagentId).pipe(Effect.scoped);
+      yield* bridge.listen(subagentId).pipe(Effect.scoped);
       yield* testHost.verify;
     }).pipe(
       Effect.provide(
-        Layer.merge(
-          TestSubagentHost.layer,
-          unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+        Layer.merge(TestSubagentHost.layer, SubagentBridge.layer).pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),

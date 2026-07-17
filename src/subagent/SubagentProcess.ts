@@ -1,11 +1,11 @@
 import { Effect, Schema, type Stream } from "effect";
 
-import * as SubagentBridge from "./SubagentBridge.ts";
 import type {
   SubagentBridgeDisconnectedError,
   SubagentBridgeProtocolError,
   SubagentEventDelivery,
 } from "./SubagentBridge.ts";
+import { SubagentBridge } from "./SubagentBridge.ts";
 import { SubagentHost } from "./SubagentHost.ts";
 import type { SubagentCommand } from "./SubagentHost.ts";
 import { SubagentId } from "./SubagentId.ts";
@@ -31,8 +31,9 @@ export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(
   function* (subagentId: SubagentId, command: SubagentCommand) {
     yield* Effect.annotateCurrentSpan({ subagentId });
 
+    const bridge = yield* SubagentBridge;
     const host = yield* SubagentHost;
-    const listener = yield* SubagentBridge.listen(subagentId);
+    const listener = yield* bridge.listen(subagentId);
 
     yield* host.start(subagentId, command);
 

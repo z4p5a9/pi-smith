@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 
 import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
-import * as SubagentBridge from "./SubagentBridge.ts";
+import { SubagentBridge } from "./SubagentBridge.ts";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { SubagentHostUnavailableError } from "./SubagentHost.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
@@ -13,6 +13,7 @@ import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSub
 it.describe("SubagentPool", () => {
   it.effect("submits a subagent spec", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const pool = yield* SubagentPool;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestSubagentHost;
@@ -34,7 +35,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      yield* SubagentBridge.connect(subagentId);
+      yield* bridge.connect(subagentId);
 
       const record = yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -48,9 +49,9 @@ it.describe("SubagentPool", () => {
       Effect.provide(
         SubagentPool.layer.pipe(
           Layer.provideMerge(TestSubagentHost.layer),
-          Layer.provideMerge(
-            unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
-          ),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
@@ -58,6 +59,7 @@ it.describe("SubagentPool", () => {
 
   it.effect("continues consuming after a checkpoint update failure", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const pool = yield* SubagentPool;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestSubagentHost;
@@ -89,7 +91,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(probeSubagentId);
 
-      yield* SubagentBridge.connect(probeSubagentId);
+      yield* bridge.connect(probeSubagentId);
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -103,9 +105,9 @@ it.describe("SubagentPool", () => {
       Effect.provide(
         SubagentPool.layer.pipe(
           Layer.provideMerge(TestSubagentHost.layer),
-          Layer.provideMerge(
-            unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
-          ),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
@@ -113,6 +115,7 @@ it.describe("SubagentPool", () => {
 
   it.effect("continues consuming after a duplicate supervisor start", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const pool = yield* SubagentPool;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestSubagentHost;
@@ -136,7 +139,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(duplicateSubagentId);
 
-      yield* SubagentBridge.connect(duplicateSubagentId);
+      yield* bridge.connect(duplicateSubagentId);
 
       yield* checkpoint.changes(duplicateSubagentId).pipe(
         Stream.filter((record) => record.status === "running"),
@@ -167,7 +170,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(probeSubagentId);
 
-      yield* SubagentBridge.connect(probeSubagentId);
+      yield* bridge.connect(probeSubagentId);
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -181,9 +184,9 @@ it.describe("SubagentPool", () => {
       Effect.provide(
         SubagentPool.layer.pipe(
           Layer.provideMerge(TestSubagentHost.layer),
-          Layer.provideMerge(
-            unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
-          ),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
@@ -191,6 +194,7 @@ it.describe("SubagentPool", () => {
 
   it.effect("continues consuming after every worker encounters a startup failure", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const pool = yield* SubagentPool;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestSubagentHost;
@@ -243,7 +247,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(probeSubagentId);
 
-      yield* SubagentBridge.connect(probeSubagentId);
+      yield* bridge.connect(probeSubagentId);
 
       const record = yield* checkpoint.changes(probeSubagentId).pipe(
         Stream.filter((currentRecord) => currentRecord.status === "running"),
@@ -257,9 +261,9 @@ it.describe("SubagentPool", () => {
       Effect.provide(
         SubagentPool.layer.pipe(
           Layer.provideMerge(TestSubagentHost.layer),
-          Layer.provideMerge(
-            unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
-          ),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
@@ -267,6 +271,7 @@ it.describe("SubagentPool", () => {
 
   it.effect("records failure and reuses the slot after a child disconnects", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const pool = yield* SubagentPool;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestSubagentHost;
@@ -304,7 +309,7 @@ it.describe("SubagentPool", () => {
       for (let index = 0; index < subagentIds.length; index++) {
         const startedSubagentId = yield* testHost.takeStart;
         const childScope = yield* Scope.fork(parentScope);
-        yield* SubagentBridge.connect(startedSubagentId).pipe(Scope.provide(childScope));
+        yield* bridge.connect(startedSubagentId).pipe(Scope.provide(childScope));
 
         childScopes.set(startedSubagentId, childScope);
       }
@@ -341,7 +346,7 @@ it.describe("SubagentPool", () => {
 
       expect(yield* testHost.takeStart).toBe(probeSubagentId);
 
-      yield* SubagentBridge.connect(probeSubagentId);
+      yield* bridge.connect(probeSubagentId);
 
       const failed = yield* checkpoint.changes(failedSubagentId).pipe(
         Stream.filter((record) => record.status === "failed"),
@@ -362,9 +367,9 @@ it.describe("SubagentPool", () => {
       Effect.provide(
         SubagentPool.layer.pipe(
           Layer.provideMerge(TestSubagentHost.layer),
-          Layer.provideMerge(
-            unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
-          ),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
         ),
       ),
     ),
