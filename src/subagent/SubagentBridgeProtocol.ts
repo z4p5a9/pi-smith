@@ -6,6 +6,14 @@ import { SubagentId } from "./SubagentId.ts";
 export const maxSubagentBridgeChildFrameBytes = 1024 * 1024;
 export const maxSubagentBridgeAcknowledgementBytes = 256;
 
+export const SubagentBridgeHelloFrame = Schema.Struct({
+  kind: Schema.Literal("hello"),
+  version: Schema.Literal(1),
+  subagentId: SubagentId,
+});
+
+export type SubagentBridgeHelloFrame = typeof SubagentBridgeHelloFrame.Type;
+
 export const SubagentBridgeEventFrame = Schema.Struct({
   kind: Schema.Literal("event"),
   version: Schema.Literal(1),
@@ -24,6 +32,7 @@ export const SubagentBridgeCloseFrame = Schema.Struct({
 export type SubagentBridgeCloseFrame = typeof SubagentBridgeCloseFrame.Type;
 
 export const SubagentBridgeChildFrame = Schema.Union([
+  SubagentBridgeHelloFrame,
   SubagentBridgeEventFrame,
   SubagentBridgeCloseFrame,
 ]);
@@ -35,6 +44,10 @@ export const SubagentBridgeAcknowledgementFrame = Schema.Struct({
 });
 
 export type SubagentBridgeAcknowledgementFrame = typeof SubagentBridgeAcknowledgementFrame.Type;
+
+export const encodeSubagentBridgeHelloFrame = Schema.encodeEffect(
+  Schema.fromJsonString(SubagentBridgeHelloFrame),
+);
 
 export const encodeSubagentBridgeEventFrame = Schema.encodeEffect(
   Schema.fromJsonString(SubagentBridgeEventFrame),

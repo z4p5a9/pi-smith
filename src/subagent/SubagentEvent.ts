@@ -2,14 +2,11 @@ import { Schema } from "effect";
 
 export const SubagentEvent = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("ready"),
+    kind: Schema.Literal("completed"),
+    report: Schema.String,
   }),
   Schema.Struct({
-    kind: Schema.Literal("message"),
-    content: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("failure"),
+    kind: Schema.Literal("failed"),
     reason: Schema.String,
   }),
 ]);

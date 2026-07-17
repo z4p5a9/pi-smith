@@ -1,8 +1,11 @@
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node";
 import { Effect, FileSystem, Layer, Option } from "effect";
 
-import { SubagentBridgeConnectError, SubagentBridgeListenError } from "./SubagentBridge.ts";
-import { SubagentBridgeTransport } from "./SubagentBridgeTransport.ts";
+import {
+  SubagentBridgeConnectError,
+  SubagentBridgeListenError,
+  SubagentBridgeTransport,
+} from "./SubagentBridgeTransport.ts";
 import type { SubagentId } from "./SubagentId.ts";
 
 const make = Effect.gen(function* () {

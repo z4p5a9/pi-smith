@@ -1,9 +1,24 @@
-import { Context, type Effect, type Scope } from "effect";
+import { Context, type Effect, Schema, type Scope } from "effect";
 import type * as Socket from "effect/unstable/socket/Socket";
 import type * as SocketServer from "effect/unstable/socket/SocketServer";
 
-import type { SubagentBridgeConnectError, SubagentBridgeListenError } from "./SubagentBridge.ts";
-import type { SubagentId } from "./SubagentId.ts";
+import { SubagentId } from "./SubagentId.ts";
+
+export class SubagentBridgeListenError extends Schema.TaggedErrorClass<SubagentBridgeListenError>()(
+  "SubagentBridgeListenError",
+  {
+    subagentId: SubagentId,
+    reason: Schema.String,
+  },
+) {}
+
+export class SubagentBridgeConnectError extends Schema.TaggedErrorClass<SubagentBridgeConnectError>()(
+  "SubagentBridgeConnectError",
+  {
+    subagentId: SubagentId,
+    reason: Schema.String,
+  },
+) {}
 
 export class SubagentBridgeTransport extends Context.Service<
   SubagentBridgeTransport,

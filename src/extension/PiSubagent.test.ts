@@ -5,7 +5,7 @@ import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-co
 import { expect, it, vi } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
-import { SubagentBridge } from "../subagent/SubagentBridge.ts";
+import * as SubagentBridge from "../subagent/SubagentBridge.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
@@ -14,9 +14,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
@@ -31,9 +30,7 @@ it.describe("Pi subagent extension", () => {
         Effect.forkChild({ startImmediately: true }),
       );
       const session = yield* listener.accept;
-      const ready = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      yield* ready.acknowledge;
       yield* Fiber.join(starting);
 
       expect(result.errors).toEqual([]);
@@ -77,8 +74,8 @@ it.describe("Pi subagent extension", () => {
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       expect(report.event).toEqual({
-        kind: "message",
-        content: "Task complete.\nFiles updated.",
+        kind: "completed",
+        report: "Task complete.\nFiles updated.",
       });
       expect(shutdownRequested).toBe(false);
 
@@ -93,10 +90,7 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
+        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -106,9 +100,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
@@ -122,9 +115,7 @@ it.describe("Pi subagent extension", () => {
         Effect.forkChild({ startImmediately: true }),
       );
       const session = yield* listener.accept;
-      const ready = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      yield* ready.acknowledge;
       yield* Fiber.join(starting);
 
       const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
@@ -144,7 +135,7 @@ it.describe("Pi subagent extension", () => {
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       expect(report.event).toEqual({
-        kind: "failure",
+        kind: "failed",
         reason: "Pi settled without an assistant response",
       });
       expect(shutdownRequested).toBe(false);
@@ -160,10 +151,7 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
+        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -173,9 +161,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
@@ -189,9 +176,7 @@ it.describe("Pi subagent extension", () => {
         Effect.forkChild({ startImmediately: true }),
       );
       const session = yield* listener.accept;
-      const ready = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      yield* ready.acknowledge;
       yield* Fiber.join(starting);
 
       const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
@@ -228,7 +213,7 @@ it.describe("Pi subagent extension", () => {
       ).pipe(Effect.forkChild({ startImmediately: true }));
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(report.event).toEqual({ kind: "failure", reason: "Model request failed" });
+      expect(report.event).toEqual({ kind: "failed", reason: "Model request failed" });
       expect(shutdownRequested).toBe(false);
 
       yield* report.acknowledge;
@@ -242,10 +227,7 @@ it.describe("Pi subagent extension", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
+        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
       ),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );

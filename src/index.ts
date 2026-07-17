@@ -13,7 +13,6 @@ import {
 import { Type } from "typebox";
 
 import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
-import { SubagentBridge } from "./subagent/SubagentBridge.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { generateSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentPool } from "./subagent/SubagentPool.ts";
@@ -49,7 +48,6 @@ export default function extension(pi: ExtensionAPI): void {
   const runtime = ManagedRuntime.make(
     SubagentPool.layer.pipe(
       Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
-      Layer.provide(SubagentBridge.layer),
       Layer.provide(unixSocketSubagentBridgeTransportLayer),
       Layer.provide(NodeChildProcessSpawner.layer),
       Layer.provide(NodeFileSystem.layer),
@@ -64,17 +62,13 @@ export default function extension(pi: ExtensionAPI): void {
 
         yield* supervisor.events.pipe(
           Stream.runForEach(({ event, subagentId }) => {
-            if (event.kind === "ready") {
-              return Effect.void;
-            }
-
             return Effect.try(() => {
               pi.sendMessage(
                 {
                   customType: "smith-subagent",
                   content:
-                    event.kind === "message"
-                      ? `Subagent ${subagentId} sent a message:\n\n${event.content}`
+                    event.kind === "completed"
+                      ? `Subagent ${subagentId} completed:\n\n${event.report}`
                       : `Subagent ${subagentId} failed:\n\n${event.reason}`,
                   display: false,
                   details: { subagentId, event },
@@ -87,10 +81,10 @@ export default function extension(pi: ExtensionAPI): void {
 
               if (ctx.hasUI) {
                 ctx.ui.notify(
-                  event.kind === "message"
-                    ? `Received a message from subagent ${subagentId}`
+                  event.kind === "completed"
+                    ? `Subagent ${subagentId} completed`
                     : `Subagent ${subagentId} failed`,
-                  event.kind === "message" ? "info" : "error",
+                  event.kind === "completed" ? "info" : "error",
                 );
               }
             }).pipe(

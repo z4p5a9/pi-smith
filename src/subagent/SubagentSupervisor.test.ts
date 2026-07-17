@@ -4,7 +4,8 @@ import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } f
 import { TestClock } from "effect/testing";
 
 import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
-import { SubagentBridge, SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import * as SubagentBridge from "./SubagentBridge.ts";
+import { SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { SubagentNotRegisteredError, SubagentRegistry } from "./SubagentRegistry.ts";
 import { SubagentAlreadyStartedError, SubagentSupervisor } from "./SubagentSupervisor.ts";
@@ -13,7 +14,6 @@ import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSub
 it.describe("SubagentSupervisor", () => {
   it.effect("starts a subagent child", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const supervisor = yield* SubagentSupervisor;
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-start");
@@ -30,12 +30,8 @@ it.describe("SubagentSupervisor", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const connection = yield* bridge.connect(subagentId);
-      const sentReady = yield* connection
-        .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* SubagentBridge.connect(subagentId);
       const child = yield* Fiber.join(started);
-      yield* Fiber.join(sentReady);
 
       const result = yield* child.await.pipe(Effect.timeoutOption("1 millis"), Effect.forkChild);
 
@@ -50,10 +46,7 @@ it.describe("SubagentSupervisor", () => {
           SubagentSupervisor.layer,
           TestSubagentHost.layer.pipe(
             Layer.provideMerge(
-              SubagentBridge.layer.pipe(
-                Layer.provide(unixSocketSubagentBridgeTransportLayer),
-                Layer.provide(NodeFileSystem.layer),
-              ),
+              unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
             ),
           ),
         ),
@@ -63,7 +56,6 @@ it.describe("SubagentSupervisor", () => {
 
   it.effect("rejects one of two concurrent starts for the same subagent ID", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const supervisor = yield* SubagentSupervisor;
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-duplicate");
@@ -82,12 +74,8 @@ it.describe("SubagentSupervisor", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const connection = yield* bridge.connect(subagentId);
-      const sentReady = yield* connection
-        .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* SubagentBridge.connect(subagentId);
       const results = yield* Fiber.join(pendingResults);
-      yield* Fiber.join(sentReady);
 
       expect(results.filter((result) => result === "started")).toHaveLength(1);
       expect(results.filter(Schema.is(SubagentAlreadyStartedError))).toHaveLength(1);
@@ -99,10 +87,7 @@ it.describe("SubagentSupervisor", () => {
           SubagentSupervisor.layer,
           TestSubagentHost.layer.pipe(
             Layer.provideMerge(
-              SubagentBridge.layer.pipe(
-                Layer.provide(unixSocketSubagentBridgeTransportLayer),
-                Layer.provide(NodeFileSystem.layer),
-              ),
+              unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
             ),
           ),
         ),
@@ -112,7 +97,6 @@ it.describe("SubagentSupervisor", () => {
 
   it.effect("registers a running child", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const supervisor = yield* SubagentSupervisor;
       const registry = yield* SubagentRegistry;
       const testHost = yield* TestSubagentHost;
@@ -130,12 +114,8 @@ it.describe("SubagentSupervisor", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const connection = yield* bridge.connect(subagentId);
-      const sentReady = yield* connection
-        .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* SubagentBridge.connect(subagentId);
       yield* Fiber.join(started);
-      yield* Fiber.join(sentReady);
 
       const process = yield* registry.get(subagentId);
 
@@ -148,10 +128,7 @@ it.describe("SubagentSupervisor", () => {
           SubagentSupervisor.layer,
           TestSubagentHost.layer.pipe(
             Layer.provideMerge(
-              SubagentBridge.layer.pipe(
-                Layer.provide(unixSocketSubagentBridgeTransportLayer),
-                Layer.provide(NodeFileSystem.layer),
-              ),
+              unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
             ),
           ),
         ),
@@ -161,16 +138,15 @@ it.describe("SubagentSupervisor", () => {
 
   it.effect("forwards acknowledged events independently from the child scope", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const supervisor = yield* SubagentSupervisor;
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-events");
       const parentScope = yield* Scope.Scope;
       const processMessage = yield* Deferred.make<void>();
       const received = yield* supervisor.events.pipe(
-        Stream.take(2),
+        Stream.take(1),
         Stream.mapEffect((event) =>
-          event.event.kind === "message"
+          event.event.kind === "completed"
             ? Deferred.await(processMessage).pipe(Effect.as(event))
             : Effect.succeed(event),
         ),
@@ -191,20 +167,15 @@ it.describe("SubagentSupervisor", () => {
       expect(yield* testHost.takeStart).toBe(subagentId);
 
       const childScope = yield* Scope.fork(parentScope);
-      const connection = yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
-      const sentReady = yield* connection
-        .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+      const connection = yield* SubagentBridge.connect(subagentId).pipe(Scope.provide(childScope));
       const child = yield* Fiber.join(started);
-      yield* Fiber.join(sentReady);
 
-      yield* connection.sendEvent({ kind: "message", content: "Task complete." });
+      yield* connection.sendEvent({ kind: "completed", report: "Task complete." });
       yield* Scope.close(childScope, Exit.void);
       yield* Deferred.succeed(processMessage, undefined);
 
       expect(Array.from(yield* Fiber.join(received))).toEqual([
-        { subagentId, event: { kind: "ready" } },
-        { subagentId, event: { kind: "message", content: "Task complete." } },
+        { subagentId, event: { kind: "completed", report: "Task complete." } },
       ]);
       expect(Schema.is(SubagentBridgeDisconnectedError)(yield* child.await.pipe(Effect.flip))).toBe(
         true,
@@ -217,10 +188,7 @@ it.describe("SubagentSupervisor", () => {
           SubagentSupervisor.layer,
           TestSubagentHost.layer.pipe(
             Layer.provideMerge(
-              SubagentBridge.layer.pipe(
-                Layer.provide(unixSocketSubagentBridgeTransportLayer),
-                Layer.provide(NodeFileSystem.layer),
-              ),
+              unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
             ),
           ),
         ),
@@ -230,7 +198,6 @@ it.describe("SubagentSupervisor", () => {
 
   it.effect("propagates child failure after cleanup", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const supervisor = yield* SubagentSupervisor;
       const registry = yield* SubagentRegistry;
       const testHost = yield* TestSubagentHost;
@@ -250,12 +217,8 @@ it.describe("SubagentSupervisor", () => {
       expect(yield* testHost.takeStart).toBe(subagentId);
 
       const childScope = yield* Scope.fork(parentScope);
-      const connection = yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
-      const sentReady = yield* connection
-        .sendEvent({ kind: "ready" })
-        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* SubagentBridge.connect(subagentId).pipe(Scope.provide(childScope));
       const child = yield* Fiber.join(started);
-      yield* Fiber.join(sentReady);
 
       yield* Scope.close(childScope, Exit.void);
 
@@ -265,7 +228,7 @@ it.describe("SubagentSupervisor", () => {
       expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
       expect(Schema.is(SubagentNotRegisteredError)(registryError)).toBe(true);
       expect(yield* testHost.active).toEqual([]);
-      yield* bridge.listen(subagentId).pipe(Effect.scoped);
+      yield* SubagentBridge.listen(subagentId).pipe(Effect.scoped);
       yield* testHost.verify;
     }).pipe(
       Effect.scoped,
@@ -274,10 +237,7 @@ it.describe("SubagentSupervisor", () => {
           SubagentSupervisor.layer,
           TestSubagentHost.layer.pipe(
             Layer.provideMerge(
-              SubagentBridge.layer.pipe(
-                Layer.provide(unixSocketSubagentBridgeTransportLayer),
-                Layer.provide(NodeFileSystem.layer),
-              ),
+              unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
             ),
           ),
         ),

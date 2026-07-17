@@ -42,12 +42,12 @@ export default function extension(pi: ExtensionAPI): void {
 
         if (entry === undefined || entry.type !== "message" || entry.message.role !== "assistant") {
           yield* harness.sendEvent({
-            kind: "failure",
+            kind: "failed",
             reason: "Pi settled without an assistant response",
           });
         } else if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
           yield* harness.sendEvent({
-            kind: "failure",
+            kind: "failed",
             reason: entry.message.errorMessage ?? `Request ${entry.message.stopReason}`,
           });
         } else {
@@ -59,7 +59,7 @@ export default function extension(pi: ExtensionAPI): void {
             }
           }
 
-          yield* harness.sendEvent({ kind: "message", content: content.join("\n") });
+          yield* harness.sendEvent({ kind: "completed", report: content.join("\n") });
         }
       }).pipe(
         Effect.andThen(
