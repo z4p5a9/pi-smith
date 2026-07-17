@@ -1,6 +1,5 @@
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Queue, Ref } from "effect";
 
-import { SubagentBridge } from "../subagent/SubagentBridge.ts";
 import {
   SubagentHost,
   type SubagentCommand,
@@ -13,7 +12,12 @@ import type { SubagentId } from "../subagent/SubagentId.ts";
 import type { SubagentSpec } from "../subagent/SubagentSpec.ts";
 
 const make = Effect.gen(function* () {
-  const bridge = yield* SubagentBridge;
+  const startCalls = yield* Queue.unbounded<{
+    readonly subagentId: SubagentId;
+    readonly spec: SubagentSpec;
+    readonly command: SubagentCommand;
+  }>();
+  const starts = yield* Queue.unbounded<SubagentId>();
   const state = yield* Ref.make<{
     readonly stubs: Array<
       | { readonly hostId: string }
@@ -52,6 +56,8 @@ const make = Effect.gen(function* () {
       return [stub, next] as const;
     });
 
+    yield* Queue.offer(startCalls, { subagentId, spec, command });
+
     if (configured === undefined) {
       return yield* Effect.die("Unexpected subagent host start");
     }
@@ -82,12 +88,7 @@ const make = Effect.gen(function* () {
         }),
     );
 
-    yield* Effect.gen(function* () {
-      const session = yield* bridge.connect(subagentId);
-
-      yield* session.sendEvent({ kind: "ready" });
-      yield* session.await;
-    }).pipe(Effect.orDie, Effect.forkScoped({ startImmediately: true }));
+    yield* Queue.offer(starts, subagentId);
 
     return handle;
   });
@@ -132,7 +133,15 @@ const make = Effect.gen(function* () {
     return yield* Effect.void;
   });
 
-  return { start, stub, calls, active, verify };
+  return {
+    start,
+    stub,
+    calls,
+    active,
+    takeStartCall: Queue.take(startCalls),
+    takeStart: Queue.take(starts),
+    verify,
+  };
 });
 
 export class TestSubagentHost extends Context.Service<TestSubagentHost>()(
