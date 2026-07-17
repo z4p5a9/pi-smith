@@ -46,6 +46,31 @@ it.describe("TestSubagentBridge", () => {
     }).pipe(Effect.scoped, Effect.provide(TestSubagentBridge.layer)),
   );
 
+  it.effect("closes paired sessions gracefully", () =>
+    Effect.gen(function* () {
+      const testBridge = yield* TestSubagentBridge;
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const listener = yield* bridge.listen(subagentId);
+      const childSession = yield* bridge.connect(subagentId);
+      const sending = yield* childSession
+        .sendEvent({ kind: "ready" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const rootSession = yield* listener.accept;
+      const delivery = yield* rootSession.events.pipe(
+        Stream.runHead,
+        Effect.flatMap(Effect.fromOption),
+      );
+
+      yield* delivery.acknowledge;
+      yield* Fiber.join(sending);
+      yield* childSession.close;
+      yield* Effect.all([rootSession.await, childSession.await]);
+
+      expect(yield* testBridge.isConnected(subagentId)).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(TestSubagentBridge.layer)),
+  );
+
   it.effect("blocks and unblocks a connection deterministically", () =>
     Effect.gen(function* () {
       const testBridge = yield* TestSubagentBridge;

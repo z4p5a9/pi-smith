@@ -9,7 +9,7 @@ import {
   SubagentBridgeProtocolError,
   SubagentBridgeSendEventError,
 } from "./SubagentBridge.ts";
-import { maxSubagentBridgeEventBytes } from "./SubagentBridgeProtocol.ts";
+import { maxSubagentBridgeChildFrameBytes } from "./SubagentBridgeProtocol.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSubagentBridgeTransport.ts";
 
@@ -130,9 +130,12 @@ it.describe("SubagentBridge", () => {
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
       const write = yield* socket.writer;
-      const event = yield* encodeJson({ version: 2, subagentId, event: { kind: "ready" } }).pipe(
-        Effect.orDie,
-      );
+      const event = yield* encodeJson({
+        kind: "event",
+        version: 2,
+        subagentId,
+        event: { kind: "ready" },
+      }).pipe(Effect.orDie);
 
       const invalidConnection = yield* socket
         .run(() => undefined, {
@@ -173,6 +176,7 @@ it.describe("SubagentBridge", () => {
       });
       const write = yield* socket.writer;
       const event = yield* encodeJson({
+        kind: "event",
         version: 1,
         subagentId: otherSubagentId,
         event: { kind: "ready" },
@@ -218,7 +222,7 @@ it.describe("SubagentBridge", () => {
 
       const invalidConnection = yield* socket
         .run(() => undefined, {
-          onOpen: write("x".repeat(maxSubagentBridgeEventBytes + 1)).pipe(Effect.orDie),
+          onOpen: write("x".repeat(maxSubagentBridgeChildFrameBytes + 1)).pipe(Effect.orDie),
         })
         .pipe(Effect.forkScoped);
       yield* Fiber.await(invalidConnection);
@@ -254,11 +258,13 @@ it.describe("SubagentBridge", () => {
       });
       const write = yield* socket.writer;
       const first = yield* encodeJson({
+        kind: "event",
         version: 1,
         subagentId,
         event: { kind: "ready" },
       }).pipe(Effect.orDie);
       const malformed = yield* encodeJson({
+        kind: "event",
         version: 1,
         subagentId,
         event: { kind: "message" },
@@ -306,7 +312,7 @@ it.describe("SubagentBridge", () => {
       yield* Fiber.join(ready);
 
       const error = yield* child
-        .sendEvent({ kind: "message", content: "x".repeat(maxSubagentBridgeEventBytes + 1) })
+        .sendEvent({ kind: "message", content: "x".repeat(maxSubagentBridgeChildFrameBytes + 1) })
         .pipe(Effect.flip);
 
       expect(Schema.is(SubagentBridgeSendEventError)(error)).toBe(true);
@@ -391,6 +397,47 @@ it.describe("SubagentBridge", () => {
       const error = yield* root.await.pipe(Effect.flip);
 
       expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("closes an established session gracefully", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-close");
+      const listener = yield* bridge.listen(subagentId);
+      const child = yield* bridge.connect(subagentId);
+      const ready = yield* child
+        .sendEvent({ kind: "ready" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const root = yield* listener.accept;
+      const received = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      yield* received.acknowledge;
+      yield* Fiber.join(ready);
+
+      const remainingEvents = yield* root.events.pipe(
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* child.close;
+      yield* Effect.all([root.await, child.await]);
+      yield* child.close;
+
+      expect(Array.from(yield* Fiber.join(remainingEvents))).toEqual([]);
+      expect(
+        Schema.is(SubagentBridgeSendEventError)(
+          yield* child.sendEvent({ kind: "ready" }).pipe(Effect.flip),
+        ),
+      ).toBe(true);
     }).pipe(
       Effect.scoped,
       Effect.provide(

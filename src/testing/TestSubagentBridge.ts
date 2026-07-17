@@ -1,8 +1,19 @@
-import { Context, Deferred, Effect, Layer, Queue, Ref, Semaphore, Stream } from "effect";
+import {
+  type Cause,
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Queue,
+  Ref,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import {
   SubagentBridge,
   type SubagentBridgeChildSession,
+  SubagentBridgeCloseError,
   SubagentBridgeConnectError,
   SubagentBridgeDisconnectedError,
   SubagentBridgeListenError,
@@ -20,8 +31,8 @@ const make = Effect.gen(function* () {
       {
         readonly accepted: Deferred.Deferred<SubagentBridgeRootSession>;
         readonly connected: boolean;
-        readonly closed?: Deferred.Deferred<void>;
-        readonly events?: Queue.Queue<SubagentEventDelivery>;
+        readonly lifetime?: Deferred.Deferred<void, SubagentBridgeDisconnectedError>;
+        readonly events?: Queue.Queue<SubagentEventDelivery, Cause.Done>;
       }
     >;
     readonly blocked: Map<SubagentId, Deferred.Deferred<void>>;
@@ -84,9 +95,15 @@ const make = Effect.gen(function* () {
           return [listener, next] as const;
         });
 
-        if (connection?.closed !== undefined && connection.events !== undefined) {
-          yield* Queue.shutdown(connection.events);
-          yield* Deferred.succeed(connection.closed, undefined);
+        if (connection?.lifetime !== undefined && connection.events !== undefined) {
+          yield* Queue.end(connection.events);
+          yield* Deferred.fail(
+            connection.lifetime,
+            SubagentBridgeDisconnectedError.make({
+              subagentId,
+              reason: "Bridge listener closed",
+            }),
+          );
         }
       }),
     );
@@ -108,10 +125,12 @@ const make = Effect.gen(function* () {
       yield* Deferred.await(blocked);
     }
 
-    const closed = yield* Deferred.make<void>();
-    const events = yield* Queue.bounded<SubagentEventDelivery>(1);
+    const lifetime = yield* Deferred.make<void, SubagentBridgeDisconnectedError>();
+    const events = yield* Queue.bounded<SubagentEventDelivery, Cause.Done>(1);
     const sendLock = yield* Semaphore.make(1);
-    let sessionAccepted = false;
+    const connection: { state: "pending" | "open" | "closing" | "closed" } = {
+      state: "pending",
+    };
     const accepted = yield* Ref.modify(state, (prev) => {
       const listener = prev.listeners.get(subagentId);
 
@@ -120,7 +139,7 @@ const make = Effect.gen(function* () {
       }
 
       const listeners = new Map(prev.listeners);
-      listeners.set(subagentId, { ...listener, connected: true, closed, events });
+      listeners.set(subagentId, { ...listener, connected: true, lifetime, events });
       const next = { ...prev, listeners };
 
       return [listener.accepted, next] as const;
@@ -135,19 +154,19 @@ const make = Effect.gen(function* () {
 
     const rootSession = {
       events: Stream.fromQueue(events),
-      await: Deferred.await(closed).pipe(
-        Effect.andThen(
-          SubagentBridgeDisconnectedError.make({
-            subagentId,
-            reason: "Bridge connection closed",
-          }),
-        ),
-      ),
+      await: Deferred.await(lifetime),
     } satisfies SubagentBridgeRootSession;
     const childSession = {
       sendEvent: Effect.fn("TestSubagentBridge.sendEvent")(
         function* (event: SubagentEvent) {
-          if (!sessionAccepted) {
+          if (connection.state === "closing" || connection.state === "closed") {
+            return yield* SubagentBridgeSendEventError.make({
+              subagentId,
+              reason: "Bridge connection is not open",
+            });
+          }
+
+          if (connection.state === "pending") {
             if (!(yield* Deferred.succeed(accepted, rootSession))) {
               return yield* SubagentBridgeSendEventError.make({
                 subagentId,
@@ -155,7 +174,7 @@ const make = Effect.gen(function* () {
               });
             }
 
-            sessionAccepted = true;
+            connection.state = "open";
           }
 
           const acknowledged = yield* Deferred.make<void>();
@@ -175,22 +194,28 @@ const make = Effect.gen(function* () {
           }),
         ),
       ),
-      await: Deferred.await(closed).pipe(
-        Effect.andThen(
-          SubagentBridgeDisconnectedError.make({
-            subagentId,
-            reason: "Bridge connection closed",
-          }),
-        ),
-      ),
-    } satisfies SubagentBridgeChildSession;
+      close: Effect.gen(function* () {
+        if (connection.state === "closed") {
+          return undefined;
+        }
 
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
+        if (connection.state === "closing") {
+          yield* Deferred.await(lifetime);
+          return undefined;
+        }
+
+        if (connection.state === "pending") {
+          return yield* SubagentBridgeCloseError.make({
+            subagentId,
+            reason: "Bridge connection is not open",
+          });
+        }
+
+        connection.state = "closing";
         yield* Ref.update(state, (prev) => {
           const listener = prev.listeners.get(subagentId);
 
-          if (listener?.closed !== closed) {
+          if (listener?.lifetime !== lifetime) {
             return prev;
           }
 
@@ -203,8 +228,49 @@ const make = Effect.gen(function* () {
 
           return next;
         });
-        yield* Queue.shutdown(events);
-        yield* Deferred.succeed(closed, undefined);
+        yield* Queue.end(events);
+        connection.state = "closed";
+        yield* Deferred.succeed(lifetime, undefined);
+        return undefined;
+      }).pipe(
+        (effect) => sendLock.withPermit(effect),
+        Effect.mapError((error) =>
+          SubagentBridgeCloseError.make({
+            subagentId,
+            reason: String(error),
+          }),
+        ),
+        Effect.withSpan("TestSubagentBridge.close"),
+      ),
+      await: Deferred.await(lifetime),
+    } satisfies SubagentBridgeChildSession;
+
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        yield* Ref.update(state, (prev) => {
+          const listener = prev.listeners.get(subagentId);
+
+          if (listener?.lifetime !== lifetime) {
+            return prev;
+          }
+
+          const listeners = new Map(prev.listeners);
+          listeners.set(subagentId, {
+            accepted: listener.accepted,
+            connected: listener.connected,
+          });
+          const next = { ...prev, listeners };
+
+          return next;
+        });
+        yield* Queue.end(events);
+        yield* Deferred.fail(
+          lifetime,
+          SubagentBridgeDisconnectedError.make({
+            subagentId,
+            reason: "Bridge connection closed",
+          }),
+        );
       }),
     );
 
@@ -245,7 +311,7 @@ const make = Effect.gen(function* () {
     const connection = yield* Ref.modify(state, (prev) => {
       const listener = prev.listeners.get(subagentId);
 
-      if (listener?.closed === undefined) {
+      if (listener?.lifetime === undefined) {
         return [undefined, prev] as const;
       }
 
@@ -259,9 +325,15 @@ const make = Effect.gen(function* () {
       return [listener, next] as const;
     });
 
-    if (connection?.closed !== undefined && connection.events !== undefined) {
-      yield* Queue.shutdown(connection.events);
-      yield* Deferred.succeed(connection.closed, undefined);
+    if (connection?.lifetime !== undefined && connection.events !== undefined) {
+      yield* Queue.end(connection.events);
+      yield* Deferred.fail(
+        connection.lifetime,
+        SubagentBridgeDisconnectedError.make({
+          subagentId,
+          reason: "Bridge connection closed",
+        }),
+      );
     }
   });
 
@@ -299,7 +371,7 @@ const make = Effect.gen(function* () {
   ) {
     const ref = yield* Ref.get(state);
 
-    return ref.listeners.get(subagentId)?.closed !== undefined;
+    return ref.listeners.get(subagentId)?.lifetime !== undefined;
   });
 
   const calls = Effect.gen(function* () {
