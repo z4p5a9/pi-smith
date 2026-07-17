@@ -5,9 +5,9 @@ import {
   type SubagentBridgeDisconnectedError,
   type SubagentBridgeProtocolError,
   type SubagentEventDelivery,
-} from "./SubagentBridge.ts";
-import { SubagentHarness } from "./SubagentHarness.ts";
-import { SubagentHost } from "./SubagentHost.ts";
+} from "../bridge/Bridge.ts";
+import { SubagentHarness } from "../harness/Harness.ts";
+import { SubagentHost } from "../host/Host.ts";
 import { SubagentId } from "./SubagentId.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 

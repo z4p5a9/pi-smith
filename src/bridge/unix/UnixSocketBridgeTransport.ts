@@ -5,8 +5,8 @@ import {
   SubagentBridgeConnectError,
   SubagentBridgeListenError,
   SubagentBridgeTransport,
-} from "./SubagentBridgeTransport.ts";
-import type { SubagentId } from "./SubagentId.ts";
+} from "../BridgeTransport.ts";
+import type { SubagentId } from "../../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -14,7 +14,7 @@ const make = Effect.gen(function* () {
   const runtimeDirectory = `/tmp/smith-${uid ?? "unsupported"}`;
   const socketPath = (subagentId: SubagentId) => `${runtimeDirectory}/${subagentId}.sock`;
 
-  const listen = Effect.fn("SubagentBridgeTransport.listen")(function* (subagentId: SubagentId) {
+  const listen = Effect.fn("UnixSocketBridgeTransport.listen")(function* (subagentId: SubagentId) {
     yield* Effect.annotateCurrentSpan({
       subagentId,
       transport: "unix-socket",
@@ -89,7 +89,9 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const connect = Effect.fn("SubagentBridgeTransport.connect")(function* (subagentId: SubagentId) {
+  const connect = Effect.fn("UnixSocketBridgeTransport.connect")(function* (
+    subagentId: SubagentId,
+  ) {
     yield* Effect.annotateCurrentSpan({
       subagentId,
       transport: "unix-socket",

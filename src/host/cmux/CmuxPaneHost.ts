@@ -1,15 +1,15 @@
 import { Config, Duration, Effect, Layer, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { isPositiveFiniteDuration } from "../lib/schema.ts";
-import type { SubagentId } from "./SubagentId.ts";
+import { isPositiveFiniteDuration } from "../../lib/schema.ts";
+import type { SubagentId } from "../../subagent/SubagentId.ts";
 import {
   SubagentHost,
   SubagentHostResponseError,
   SubagentHostStartError,
   SubagentHostUnavailableError,
   type SubagentCommand,
-} from "./SubagentHost.ts";
+} from "../Host.ts";
 
 const encodeCmuxRpcParams = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -31,7 +31,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const closeTimeout = yield* config;
 
-    const rpc = Effect.fn("CmuxPaneSubagentHost.rpc")(function* (
+    const rpc = Effect.fn("CmuxPaneHost.rpc")(function* (
       method: string,
       params: Readonly<Record<string, unknown>>,
     ) {
@@ -56,7 +56,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       return { exitCode, stdout, stderr };
     });
 
-    const create = Effect.fn("CmuxPaneSubagentHost.create")(function* (
+    const create = Effect.fn("CmuxPaneHost.create")(function* (
       subagentId: SubagentId,
       command: SubagentCommand,
       workspaceId: string,
@@ -106,7 +106,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       return response;
     });
 
-    const close = Effect.fn("CmuxPaneSubagentHost.close")(function* (
+    const close = Effect.fn("CmuxPaneHost.close")(function* (
       workspaceId: string,
       surfaceId: string,
     ) {

@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 import { Effect, Layer } from "effect";
 
-import { SubagentHarness, SubagentHarnessCommandError } from "../../subagent/SubagentHarness.ts";
+import { SubagentHarness, SubagentHarnessCommandError } from "../Harness.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 import type { SubagentSpec } from "../../subagent/SubagentSpec.ts";
 

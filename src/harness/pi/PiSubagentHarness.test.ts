@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
-import { SubagentHarness, SubagentHarnessCommandError } from "../../subagent/SubagentHarness.ts";
+import { SubagentHarness, SubagentHarnessCommandError } from "../Harness.ts";
 import { decodeSubagentId } from "../../subagent/SubagentId.ts";
 import * as PiSubagentHarness from "./PiSubagentHarness.ts";
 

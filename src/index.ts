@@ -13,11 +13,11 @@ import {
 import { Type } from "typebox";
 
 import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
-import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
-import { SubagentBridge } from "./subagent/SubagentBridge.ts";
+import { SubagentBridge } from "./bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "./bridge/unix/UnixSocketBridgeTransport.ts";
+import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
-import { layer as unixSocketSubagentBridgeTransportLayer } from "./subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const childMarker = Effect.runSync(
@@ -49,9 +49,9 @@ export default function extension(pi: ExtensionAPI): void {
     SubagentCoordinator.layer.pipe(
       Layer.provide(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
-      Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
+      Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
       Layer.provide(SubagentBridge.layer),
-      Layer.provide(unixSocketSubagentBridgeTransportLayer),
+      Layer.provide(UnixSocketBridgeTransport.layer),
       Layer.provide(NodeChildProcessSpawner.layer),
       Layer.provide(NodeFileSystem.layer),
       Layer.provide(NodePath.layer),

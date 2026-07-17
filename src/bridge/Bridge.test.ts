@@ -7,10 +7,10 @@ import {
   SubagentBridgeDisconnectedError,
   SubagentBridgeProtocolError,
   SubagentBridgeSendEventError,
-} from "./SubagentBridge.ts";
-import { maxSubagentBridgeChildFrameBytes } from "./SubagentBridgeProtocol.ts";
-import { decodeSubagentId } from "./SubagentId.ts";
-import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSubagentBridgeTransport.ts";
+} from "./Bridge.ts";
+import { maxSubagentBridgeChildFrameBytes } from "./BridgeProtocol.ts";
+import { decodeSubagentId } from "../subagent/SubagentId.ts";
+import * as UnixSocketBridgeTransport from "./unix/UnixSocketBridgeTransport.ts";
 
 const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -45,7 +45,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -82,7 +82,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -114,7 +114,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -151,7 +151,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -182,7 +182,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -215,7 +215,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -251,7 +251,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -279,7 +279,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -318,7 +318,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -335,7 +335,7 @@ it.describe("SubagentBridge", () => {
     }).pipe(
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -353,7 +353,7 @@ it.describe("SubagentBridge", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

@@ -6,7 +6,7 @@ import {
   type SubagentHostResponseError,
   type SubagentHostStartError,
   type SubagentHostUnavailableError,
-} from "../subagent/SubagentHost.ts";
+} from "../host/Host.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
@@ -30,7 +30,7 @@ const make = Effect.gen(function* () {
     active: new Set(),
   });
 
-  const start = Effect.fn("TestSubagentHost.start")(function* (
+  const start = Effect.fn("TestHost.start")(function* (
     subagentId: SubagentId,
     command: SubagentCommand,
   ) {
@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
     return yield* Effect.void;
   });
 
-  const stub = Effect.fn("TestSubagentHost.stub")(function* (
+  const stub = Effect.fn("TestHost.stub")(function* (
     stubs: ReadonlyArray<
       null | SubagentHostUnavailableError | SubagentHostStartError | SubagentHostResponseError
     >,
@@ -123,13 +123,10 @@ const make = Effect.gen(function* () {
   };
 });
 
-export class TestSubagentHost extends Context.Service<TestSubagentHost>()(
-  "@smith/testing/TestSubagentHost",
-  { make },
-) {
-  static readonly layerNoDeps = Layer.effect(TestSubagentHost, TestSubagentHost.make);
+export class TestHost extends Context.Service<TestHost>()("@smith/testing/TestHost", { make }) {
+  static readonly layerNoDeps = Layer.effect(TestHost, TestHost.make);
 
-  static readonly layer = Layer.effect(SubagentHost, TestSubagentHost).pipe(
-    Layer.provideMerge(TestSubagentHost.layerNoDeps),
+  static readonly layer = Layer.effect(SubagentHost, TestHost).pipe(
+    Layer.provideMerge(TestHost.layerNoDeps),
   );
 }

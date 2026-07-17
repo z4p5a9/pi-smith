@@ -5,9 +5,9 @@ import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-co
 import { expect, it, vi } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
-import { SubagentBridge } from "../subagent/SubagentBridge.ts";
+import { SubagentBridge } from "../bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../bridge/unix/UnixSocketBridgeTransport.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
-import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
 it.describe("Pi subagent extension", () => {
   it.effect("reports a settled assistant response and shuts down after acknowledgement", () => {
@@ -92,7 +92,7 @@ it.describe("Pi subagent extension", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -157,7 +157,7 @@ it.describe("Pi subagent extension", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -237,7 +237,7 @@ it.describe("Pi subagent extension", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -316,7 +316,7 @@ it.describe("Pi subagent extension", () => {
       Effect.scoped,
       Effect.provide(
         SubagentBridge.layer.pipe(
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

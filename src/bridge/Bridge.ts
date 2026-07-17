@@ -22,10 +22,10 @@ import {
   maxSubagentBridgeChildFrameBytes,
   SubagentBridgeAcknowledgementFrame,
   SubagentBridgeChildFrame,
-} from "./SubagentBridgeProtocol.ts";
-import { SubagentBridgeTransport } from "./SubagentBridgeTransport.ts";
-import type { SubagentEvent } from "./SubagentEvent.ts";
-import { SubagentId } from "./SubagentId.ts";
+} from "./BridgeProtocol.ts";
+import { SubagentBridgeTransport } from "./BridgeTransport.ts";
+import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
+import { SubagentId } from "../subagent/SubagentId.ts";
 
 export interface SubagentBridgeRootSession {
   readonly events: Stream.Stream<SubagentEventDelivery>;
@@ -444,9 +444,8 @@ const make = Effect.gen(function* () {
   return { listen, connect };
 });
 
-export class SubagentBridge extends Context.Service<SubagentBridge>()(
-  "@smith/subagent/SubagentBridge",
-  { make },
-) {
+export class SubagentBridge extends Context.Service<SubagentBridge>()("@smith/bridge/Bridge", {
+  make,
+}) {
   static readonly layer = Layer.effect(SubagentBridge, SubagentBridge.make);
 }

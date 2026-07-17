@@ -3,9 +3,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Config, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect";
 
 import { ChildSession } from "../harness/pi/ChildSession.ts";
-import { SubagentBridge } from "../subagent/SubagentBridge.ts";
+import { SubagentBridge } from "../bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../bridge/unix/UnixSocketBridgeTransport.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
-import { layer as unixSocketSubagentBridgeTransportLayer } from "../subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const subagentId = Effect.runSync(
@@ -20,7 +20,7 @@ export default function extension(pi: ExtensionAPI): void {
   const runtime = ManagedRuntime.make(
     ChildSession.layer(subagentId).pipe(
       Layer.provide(SubagentBridge.layer),
-      Layer.provide(unixSocketSubagentBridgeTransportLayer),
+      Layer.provide(UnixSocketBridgeTransport.layer),
       Layer.provide(NodeFileSystem.layer),
     ),
   );

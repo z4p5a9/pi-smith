@@ -2,9 +2,9 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
-import { SubagentBridge } from "../../subagent/SubagentBridge.ts";
+import { SubagentBridge } from "../../bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../../bridge/unix/UnixSocketBridgeTransport.ts";
 import { decodeSubagentId } from "../../subagent/SubagentId.ts";
-import { layer as unixSocketSubagentBridgeTransportLayer } from "../../subagent/UnixSocketSubagentBridgeTransport.ts";
 import { ChildSession } from "./ChildSession.ts";
 
 it.effect("constructs without connecting the Bridge", () =>
@@ -15,7 +15,7 @@ it.effect("constructs without connecting the Bridge", () =>
       Effect.provide(
         ChildSession.layer(subagentId).pipe(
           Layer.provide(SubagentBridge.layer),
-          Layer.provide(unixSocketSubagentBridgeTransportLayer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

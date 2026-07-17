@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
-import { SubagentEvent } from "./SubagentEvent.ts";
-import { SubagentId } from "./SubagentId.ts";
+import { SubagentEvent } from "../subagent/SubagentEvent.ts";
+import { SubagentId } from "../subagent/SubagentId.ts";
 
 export const maxSubagentBridgeChildFrameBytes = 1024 * 1024;
 export const maxSubagentBridgeAcknowledgementBytes = 256;

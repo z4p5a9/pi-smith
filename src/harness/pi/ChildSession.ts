@@ -1,7 +1,7 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Context, Effect, Layer, Scope } from "effect";
 
-import { SubagentBridge, type SubagentBridgeChildSession } from "../../subagent/SubagentBridge.ts";
+import { SubagentBridge, type SubagentBridgeChildSession } from "../../bridge/Bridge.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 
 const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId) {

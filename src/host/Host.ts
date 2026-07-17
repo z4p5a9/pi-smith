@@ -1,6 +1,6 @@
 import { Context, Schema, type Effect, type Scope } from "effect";
 
-import { SubagentId } from "./SubagentId.ts";
+import { SubagentId } from "../subagent/SubagentId.ts";
 
 export interface SubagentCommand {
   readonly executable: string;
@@ -48,4 +48,4 @@ export class SubagentHost extends Context.Service<
       Scope.Scope
     >;
   }
->()("@smith/subagent/SubagentHost") {}
+>()("@smith/host/Host") {}

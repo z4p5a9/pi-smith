@@ -1,14 +1,14 @@
 import { expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { SubagentHost, SubagentHostUnavailableError } from "../subagent/SubagentHost.ts";
+import { SubagentHost, SubagentHostUnavailableError } from "../host/Host.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
-import { TestSubagentHost } from "./TestSubagentHost.ts";
+import { TestHost } from "./TestHost.ts";
 
-it.describe("TestSubagentHost", () => {
+it.describe("TestHost", () => {
   it.effect("stubs and records a scoped host start", () =>
     Effect.gen(function* () {
-      const testHost = yield* TestSubagentHost;
+      const testHost = yield* TestHost;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_host-start");
 
@@ -41,12 +41,12 @@ it.describe("TestSubagentHost", () => {
       ]);
       expect(yield* testHost.active).toEqual([]);
       yield* testHost.verify;
-    }).pipe(Effect.provide(TestSubagentHost.layer)),
+    }).pipe(Effect.provide(TestHost.layer)),
   );
 
   it.effect("stubs a host start failure without connecting", () =>
     Effect.gen(function* () {
-      const testHost = yield* TestSubagentHost;
+      const testHost = yield* TestHost;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_host-failure");
 
@@ -65,6 +65,6 @@ it.describe("TestSubagentHost", () => {
       expect(error).toBeInstanceOf(SubagentHostUnavailableError);
       expect(yield* testHost.active).toEqual([]);
       yield* testHost.verify;
-    }).pipe(Effect.provide(TestSubagentHost.layer)),
+    }).pipe(Effect.provide(TestHost.layer)),
   );
 });
