@@ -1,21 +1,23 @@
 import { fileURLToPath } from "node:url";
 
-import { Schema } from "effect";
+import { Effect, Layer } from "effect";
 
-import type { SubagentCommand } from "../../subagent/SubagentHost.ts";
+import { SubagentHarness, SubagentHarnessCommandError } from "../../subagent/SubagentHarness.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 import type { SubagentSpec } from "../../subagent/SubagentSpec.ts";
 
-export class PiSubagentEntrypointUnavailableError extends Schema.TaggedErrorClass<PiSubagentEntrypointUnavailableError>()(
-  "PiSubagentEntrypointUnavailableError",
-  {},
-) {}
-
-export const makeCommand = (subagentId: SubagentId, spec: SubagentSpec): SubagentCommand => {
+const makeCommand = Effect.fn("PiSubagentHarness.makeCommand")(function* (
+  subagentId: SubagentId,
+  spec: SubagentSpec,
+) {
   const piEntrypoint = process.argv[1];
 
   if (piEntrypoint === undefined) {
-    throw PiSubagentEntrypointUnavailableError.make({});
+    return yield* SubagentHarnessCommandError.make({
+      subagentId,
+      harness: "pi",
+      reason: "Pi entrypoint is unavailable",
+    });
   }
 
   return {
@@ -31,4 +33,6 @@ export const makeCommand = (subagentId: SubagentId, spec: SubagentSpec): Subagen
     cwd: spec.cwd,
     env: { SMITH_SUBAGENT_ID: subagentId },
   };
-};
+});
+
+export const layer = Layer.succeed(SubagentHarness, SubagentHarness.of({ makeCommand }));

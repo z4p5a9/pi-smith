@@ -1,11 +1,13 @@
 import { Context, Effect, Layer, Schema, Stream, SubscriptionRef } from "effect";
 
+import { SubagentEvent } from "./SubagentEvent.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { SubagentSpec } from "./SubagentSpec.ts";
 
 export const SubagentRecord = Schema.Struct({
   subagentId: SubagentId,
-  status: Schema.Literals(["queued", "starting", "running", "failed"]),
+  status: Schema.Literals(["queued", "starting", "running", "completed", "failed"]),
+  latestEvent: Schema.optional(SubagentEvent),
   ...SubagentSpec.fields,
 });
 

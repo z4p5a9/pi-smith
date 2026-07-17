@@ -1,48 +1,84 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { SubagentBridge, SubagentBridgeDisconnectedError } from "./SubagentBridge.ts";
+import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
+import { SubagentBridge } from "./SubagentBridge.ts";
+import { SubagentHarness } from "./SubagentHarness.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { spawnSubagentProcess, SubagentProcessStartTimeoutError } from "./SubagentProcess.ts";
-import { TestSubagentHost } from "../testing/TestSubagentHost.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "./UnixSocketSubagentBridgeTransport.ts";
 
 it.describe("spawnSubagentProcess", () => {
-  it.effect("starts the host after listening and returns after hello is acknowledged", () =>
+  it.effect("exposes Bridge event deliveries separately from the session lifetime", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
       const testHost = yield* TestSubagentHost;
-      const subagentId = yield* decodeSubagentId("sa_12345678_process-start");
       const parentScope = yield* Scope.Scope;
+      const processScope = yield* Scope.fork(parentScope);
+      const delivered = yield* Deferred.make<void>();
+      const subagentId = yield* decodeSubagentId("sa_12345678_process-start");
 
       yield* testHost.stub([null]);
 
-      const started = yield* spawnSubagentProcess(subagentId, {
-        executable: "pi",
-        args: ["--name", "Review API", "Complete the task."],
+      const spawning = yield* spawnSubagentProcess(subagentId, {
+        title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
-      }).pipe(Effect.forkChild({ startImmediately: true }));
+      }).pipe(Scope.provide(processScope), Effect.forkChild({ startImmediately: true }));
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const childScope = yield* Scope.fork(parentScope);
-      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
-      const process = yield* Fiber.join(started);
+      const child = yield* bridge.connect(subagentId);
+      const process = yield* Fiber.join(spawning);
+      const sending = yield* child
+        .sendEvent({ kind: "completed", report: "Task complete." })
+        .pipe(Effect.forkChild({ startImmediately: true }));
 
-      expect(yield* process.status).toBe("running");
+      expect(yield* Deferred.isDone(delivered)).toBe(false);
 
-      yield* Scope.close(childScope, Exit.void);
+      const awaiting = yield* Effect.all(
+        [
+          process.await,
+          process.events.pipe(
+            Stream.runForEach((delivery) =>
+              Deferred.succeed(delivered, undefined).pipe(
+                Effect.andThen(delivery.acknowledge),
+                Effect.asVoid,
+              ),
+            ),
+          ),
+        ],
+        { concurrency: "unbounded", discard: true },
+      ).pipe(Effect.forkChild({ startImmediately: true }));
 
-      const error = yield* process.await.pipe(Effect.flip);
+      yield* Deferred.await(delivered);
 
-      expect(Schema.is(SubagentBridgeDisconnectedError)(error)).toBe(true);
+      yield* Fiber.join(sending);
+      yield* child.close;
+      yield* Fiber.join(awaiting);
+      yield* Scope.close(processScope, Exit.void);
+
+      expect(yield* testHost.active).toEqual([]);
       yield* testHost.verify;
     }).pipe(
       Effect.scoped,
       Effect.provide(
         Layer.merge(TestSubagentHost.layer, SubagentBridge.layer).pipe(
+          Layer.provideMerge(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () =>
+                  Effect.succeed({
+                    executable: "pi",
+                    args: ["--name", "Review API", "Complete the task."],
+                    cwd: "/worktree",
+                  }),
+              }),
+            ),
+          ),
           Layer.provide(unixSocketSubagentBridgeTransportLayer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -59,8 +95,8 @@ it.describe("spawnSubagentProcess", () => {
       yield* testHost.stub([null]);
 
       const result = yield* spawnSubagentProcess(subagentId, {
-        executable: "pi",
-        args: ["--name", "Review API", "Complete the task."],
+        title: "Review API",
+        prompt: "Complete the task.",
         cwd: "/worktree",
       }).pipe(Effect.scoped, Effect.flip, Effect.forkChild({ startImmediately: true }));
 
@@ -76,6 +112,19 @@ it.describe("spawnSubagentProcess", () => {
     }).pipe(
       Effect.provide(
         Layer.merge(TestSubagentHost.layer, SubagentBridge.layer).pipe(
+          Layer.provideMerge(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () =>
+                  Effect.succeed({
+                    executable: "pi",
+                    args: ["--name", "Review API", "Complete the task."],
+                    cwd: "/worktree",
+                  }),
+              }),
+            ),
+          ),
           Layer.provide(unixSocketSubagentBridgeTransportLayer),
           Layer.provide(NodeFileSystem.layer),
         ),

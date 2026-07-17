@@ -12,12 +12,11 @@ import {
 } from "effect";
 import { Type } from "typebox";
 
+import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
 import { layer as cmuxPaneSubagentHostLayer } from "./subagent/CmuxPaneSubagentHost.ts";
 import { SubagentBridge } from "./subagent/SubagentBridge.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
-import { generateSubagentId } from "./subagent/SubagentId.ts";
-import { SubagentPool } from "./subagent/SubagentPool.ts";
-import { SubagentSupervisor } from "./subagent/SubagentSupervisor.ts";
+import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
 import { layer as unixSocketSubagentBridgeTransportLayer } from "./subagent/UnixSocketSubagentBridgeTransport.ts";
 
 export default function extension(pi: ExtensionAPI): void {
@@ -47,7 +46,9 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   const runtime = ManagedRuntime.make(
-    SubagentPool.layer.pipe(
+    SubagentCoordinator.layer.pipe(
+      Layer.provide(SubagentCheckpoint.layer),
+      Layer.provide(PiSubagentHarness.layer),
       Layer.provide(cmuxPaneSubagentHostLayer({ workspaceId, surfaceId })),
       Layer.provide(SubagentBridge.layer),
       Layer.provide(unixSocketSubagentBridgeTransportLayer),
@@ -60,11 +61,11 @@ export default function extension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     runtime.runFork(
       Effect.gen(function* () {
-        const supervisor = yield* SubagentSupervisor;
+        const coordinator = yield* SubagentCoordinator;
 
-        yield* supervisor.events.pipe(
-          Stream.runForEach(({ event, subagentId }) => {
-            return Effect.try(() => {
+        yield* coordinator.events.pipe(
+          Stream.runForEach(({ event, subagentId }) =>
+            Effect.try(() => {
               pi.sendMessage(
                 {
                   customType: "smith-subagent",
@@ -95,8 +96,8 @@ export default function extension(pi: ExtensionAPI): void {
                   Effect.annotateLogs({ subagentId }),
                 ),
               ),
-            );
-          }),
+            ),
+          ),
         );
       }),
     );
@@ -128,13 +129,9 @@ export default function extension(pi: ExtensionAPI): void {
     execute(toolCallId, { prompt, title }, _signal, _onUpdate, ctx) {
       return runtime.runPromise(
         Effect.gen(function* () {
-          const subagentId = yield* generateSubagentId(title);
-          const checkpoint = yield* SubagentCheckpoint;
-          const pool = yield* SubagentPool;
+          const coordinator = yield* SubagentCoordinator;
           const spec = { title, prompt, cwd: ctx.cwd };
-
-          yield* checkpoint.put({ subagentId, status: "queued", ...spec });
-          yield* pool.submit(subagentId, spec);
+          const subagentId = yield* coordinator.create(spec);
 
           return {
             content: [{ type: "text" as const, text: subagentId }],

@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 
+import type { SubagentId } from "./SubagentId.ts";
+
 export const SubagentEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("completed"),
@@ -12,3 +14,8 @@ export const SubagentEvent = Schema.Union([
 ]);
 
 export type SubagentEvent = typeof SubagentEvent.Type;
+
+export interface SubagentEventEnvelope {
+  readonly subagentId: SubagentId;
+  readonly event: SubagentEvent;
+}
