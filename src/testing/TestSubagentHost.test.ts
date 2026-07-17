@@ -12,23 +12,18 @@ it.describe("TestSubagentHost", () => {
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_host-start");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       yield* Effect.scoped(
         Effect.gen(function* () {
-          const handle = yield* host.start(
-            subagentId,
-            { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-            {
-              executable: "pi",
-              args: ["--name", "Review API"],
-              cwd: "/worktree",
-              env: { SMITH_SUBAGENT_ID: subagentId },
-            },
-          );
+          yield* host.start(subagentId, {
+            executable: "pi",
+            args: ["--name", "Review API"],
+            cwd: "/worktree",
+            env: { SMITH_SUBAGENT_ID: subagentId },
+          });
 
-          expect(handle).toEqual({ hostId: "test-host" });
-          expect(yield* testHost.active).toEqual([{ hostId: "test-host" }]);
+          expect(yield* testHost.active).toEqual([subagentId]);
           expect(yield* testHost.takeStart).toBe(subagentId);
         }),
       );
@@ -36,7 +31,6 @@ it.describe("TestSubagentHost", () => {
       expect(yield* testHost.calls).toEqual([
         {
           subagentId,
-          spec: { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
           command: {
             executable: "pi",
             args: ["--name", "Review API"],
@@ -57,21 +51,15 @@ it.describe("TestSubagentHost", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_host-failure");
 
       yield* testHost.stub([
-        {
-          error: SubagentHostUnavailableError.make({
-            subagentId,
-            host: "cmux-pane",
-            reason: "CMUX unavailable",
-          }),
-        },
+        SubagentHostUnavailableError.make({
+          subagentId,
+          host: "test",
+          reason: "Host unavailable",
+        }),
       ]);
 
       const error = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
+        .start(subagentId, { executable: "pi", args: [] })
         .pipe(Effect.scoped, Effect.flip);
 
       expect(error).toBeInstanceOf(SubagentHostUnavailableError);

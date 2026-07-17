@@ -1,7 +1,6 @@
 import { Context, Schema, type Effect, type Scope } from "effect";
 
 import { SubagentId } from "./SubagentId.ts";
-import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export interface SubagentCommand {
   readonly executable: string;
@@ -10,15 +9,11 @@ export interface SubagentCommand {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-export interface SubagentHostHandle {
-  readonly hostId: string;
-}
-
 export class SubagentHostUnavailableError extends Schema.TaggedErrorClass<SubagentHostUnavailableError>()(
   "SubagentHostUnavailableError",
   {
     subagentId: SubagentId,
-    host: Schema.Literal("cmux-pane"),
+    host: Schema.String,
     reason: Schema.String,
   },
 ) {}
@@ -27,8 +22,7 @@ export class SubagentHostStartError extends Schema.TaggedErrorClass<SubagentHost
   "SubagentHostStartError",
   {
     subagentId: SubagentId,
-    host: Schema.Literal("cmux-pane"),
-    exitCode: Schema.Finite,
+    host: Schema.String,
     reason: Schema.String,
   },
 ) {}
@@ -37,7 +31,7 @@ export class SubagentHostResponseError extends Schema.TaggedErrorClass<SubagentH
   "SubagentHostResponseError",
   {
     subagentId: SubagentId,
-    host: Schema.Literal("cmux-pane"),
+    host: Schema.String,
     reason: Schema.String,
   },
 ) {}
@@ -47,10 +41,9 @@ export class SubagentHost extends Context.Service<
   {
     readonly start: (
       subagentId: SubagentId,
-      spec: SubagentSpec,
       command: SubagentCommand,
     ) => Effect.Effect<
-      SubagentHostHandle,
+      void,
       SubagentHostUnavailableError | SubagentHostStartError | SubagentHostResponseError,
       Scope.Scope
     >;

@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Queue } from "effect";
 
+import { makeCommand } from "../harness/pi/command.ts";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import type { SubagentId } from "./SubagentId.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
@@ -18,7 +19,7 @@ const make = Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ subagentId });
 
       yield* checkpoint.update(subagentId, { status: "starting" });
-      const child = yield* supervisor.start(subagentId, spec);
+      const child = yield* supervisor.start(subagentId, makeCommand(subagentId, spec));
       yield* checkpoint
         .update(subagentId, { status: "running" })
         .pipe(Effect.catch(Effect.logError));

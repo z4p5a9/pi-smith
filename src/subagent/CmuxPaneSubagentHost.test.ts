@@ -35,20 +35,15 @@ it.describe("CmuxPaneSubagentHost", () => {
         { exitCode: Effect.succeed(0) },
       ]);
 
-      const handle = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          {
-            executable: "/opt/pi",
-            args: ["--title", "Review's API", ""],
-            cwd: "/worktree",
-            env: { SMITH_CHILD_CONFIG: "/tmp/smith.json" },
-          },
-        )
+      yield* host
+        .start(subagentId, {
+          executable: "/opt/pi",
+          args: ["--title", "Review's API", ""],
+          cwd: "/worktree",
+          env: { SMITH_CHILD_CONFIG: "/tmp/smith.json" },
+        })
         .pipe(Effect.scoped);
 
-      expect(handle).toEqual({ hostId: childSurfaceId });
       expect(yield* childProcesses.calls).toMatchObject([
         {
           command: "cmux",
@@ -107,11 +102,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const error = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
+        .start(subagentId, { executable: "pi", args: [] })
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostUnavailableError)(error)).toBe(true);
@@ -140,16 +131,11 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const error = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
+        .start(subagentId, { executable: "pi", args: [] })
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostStartError)(error)).toBe(true);
       expect(error).toMatchObject({
-        exitCode: 1,
         reason: "method_not_found: Unknown method",
       });
       yield* childProcesses.verify;
@@ -172,11 +158,7 @@ it.describe("CmuxPaneSubagentHost", () => {
       yield* childProcesses.stub([{ exitCode: Effect.succeed(0), stdout: "{}" }]);
 
       const error = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
+        .start(subagentId, { executable: "pi", args: [] })
         .pipe(Effect.scoped, Effect.flip);
 
       expect(Schema.is(SubagentHostResponseError)(error)).toBe(true);
@@ -210,15 +192,8 @@ it.describe("CmuxPaneSubagentHost", () => {
         { exitCode: Effect.succeed(1), stderr: "surface not found" },
       ]);
 
-      const handle = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
-        .pipe(Effect.scoped);
+      yield* host.start(subagentId, { executable: "pi", args: [] }).pipe(Effect.scoped);
 
-      expect(handle.hostId).toBe(childSurfaceId);
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(
@@ -248,16 +223,12 @@ it.describe("CmuxPaneSubagentHost", () => {
       ]);
 
       const start = yield* host
-        .start(
-          subagentId,
-          { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" },
-          { executable: "pi", args: [] },
-        )
+        .start(subagentId, { executable: "pi", args: [] })
         .pipe(Effect.scoped, Effect.forkChild({ startImmediately: true }));
 
       yield* TestClock.adjust("20 seconds");
 
-      expect(yield* Fiber.join(start)).toEqual({ hostId: childSurfaceId });
+      yield* Fiber.join(start);
       yield* childProcesses.verify;
     }).pipe(
       Effect.provide(

@@ -7,9 +7,8 @@ import type {
   SubagentEventDelivery,
 } from "./SubagentBridge.ts";
 import { SubagentHost } from "./SubagentHost.ts";
+import type { SubagentCommand } from "./SubagentHost.ts";
 import { SubagentId } from "./SubagentId.ts";
-import { makePiSubagentCommand } from "./PiSubagentHarness.ts";
-import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export interface SubagentProcess {
   readonly subagentId: SubagentId;
@@ -29,14 +28,13 @@ export class SubagentProcessStartTimeoutError extends Schema.TaggedErrorClass<Su
 ) {}
 
 export const spawnSubagentProcess = Effect.fn("SubagentProcess.spawn")(
-  function* (subagentId: SubagentId, spec: SubagentSpec) {
+  function* (subagentId: SubagentId, command: SubagentCommand) {
     yield* Effect.annotateCurrentSpan({ subagentId });
 
     const host = yield* SubagentHost;
     const listener = yield* SubagentBridge.listen(subagentId);
-    const command = yield* makePiSubagentCommand(subagentId, spec);
 
-    yield* host.start(subagentId, spec, command);
+    yield* host.start(subagentId, command);
 
     const session = yield* listener.accept;
 

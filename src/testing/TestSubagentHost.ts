@@ -3,46 +3,35 @@ import { Context, Effect, Layer, Queue, Ref } from "effect";
 import {
   SubagentHost,
   type SubagentCommand,
-  type SubagentHostHandle,
   type SubagentHostResponseError,
   type SubagentHostStartError,
   type SubagentHostUnavailableError,
 } from "../subagent/SubagentHost.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
-import type { SubagentSpec } from "../subagent/SubagentSpec.ts";
 
 const make = Effect.gen(function* () {
   const startCalls = yield* Queue.unbounded<{
     readonly subagentId: SubagentId;
-    readonly spec: SubagentSpec;
     readonly command: SubagentCommand;
   }>();
   const starts = yield* Queue.unbounded<SubagentId>();
   const state = yield* Ref.make<{
     readonly stubs: Array<
-      | { readonly hostId: string }
-      | {
-          readonly error:
-            | SubagentHostUnavailableError
-            | SubagentHostStartError
-            | SubagentHostResponseError;
-        }
+      null | SubagentHostUnavailableError | SubagentHostStartError | SubagentHostResponseError
     >;
     readonly calls: Array<{
       readonly subagentId: SubagentId;
-      readonly spec: SubagentSpec;
       readonly command: SubagentCommand;
     }>;
-    readonly active: Map<SubagentId, SubagentHostHandle>;
+    readonly active: Set<SubagentId>;
   }>({
     stubs: [],
     calls: [],
-    active: new Map(),
+    active: new Set(),
   });
 
   const start = Effect.fn("TestSubagentHost.start")(function* (
     subagentId: SubagentId,
-    spec: SubagentSpec,
     command: SubagentCommand,
   ) {
     const configured = yield* Ref.modify(state, (prev) => {
@@ -50,37 +39,33 @@ const make = Effect.gen(function* () {
       const next = {
         ...prev,
         stubs,
-        calls: [...prev.calls, { subagentId, spec, command }],
+        calls: [...prev.calls, { subagentId, command }],
       };
 
       return [stub, next] as const;
     });
 
-    yield* Queue.offer(startCalls, { subagentId, spec, command });
+    yield* Queue.offer(startCalls, { subagentId, command });
 
     if (configured === undefined) {
       return yield* Effect.die("Unexpected subagent host start");
     }
 
-    if ("error" in configured) {
-      return yield* configured.error;
+    if (configured !== null) {
+      return yield* configured;
     }
 
-    const handle = yield* Effect.acquireRelease(
+    yield* Effect.acquireRelease(
       Ref.update(state, (prev) => {
-        const active = new Map(prev.active);
-        active.set(subagentId, configured);
+        const active = new Set(prev.active);
+        active.add(subagentId);
         const next = { ...prev, active };
 
         return next;
-      }).pipe(Effect.as(configured)),
-      (acquired) =>
+      }),
+      () =>
         Ref.update(state, (prev) => {
-          if (prev.active.get(subagentId) !== acquired) {
-            return prev;
-          }
-
-          const active = new Map(prev.active);
+          const active = new Set(prev.active);
           active.delete(subagentId);
           const next = { ...prev, active };
 
@@ -90,18 +75,12 @@ const make = Effect.gen(function* () {
 
     yield* Queue.offer(starts, subagentId);
 
-    return handle;
+    return yield* Effect.void;
   });
 
   const stub = Effect.fn("TestSubagentHost.stub")(function* (
     stubs: ReadonlyArray<
-      | { readonly hostId: string }
-      | {
-          readonly error:
-            | SubagentHostUnavailableError
-            | SubagentHostStartError
-            | SubagentHostResponseError;
-        }
+      null | SubagentHostUnavailableError | SubagentHostStartError | SubagentHostResponseError
     >,
   ) {
     yield* Ref.update(state, (prev) => {
@@ -120,7 +99,7 @@ const make = Effect.gen(function* () {
   const active = Effect.gen(function* () {
     const ref = yield* Ref.get(state);
 
-    return [...ref.active.values()];
+    return [...ref.active];
   });
 
   const verify = Effect.gen(function* () {
@@ -148,7 +127,9 @@ export class TestSubagentHost extends Context.Service<TestSubagentHost>()(
   "@smith/testing/TestSubagentHost",
   { make },
 ) {
+  static readonly layerNoDeps = Layer.effect(TestSubagentHost, TestSubagentHost.make);
+
   static readonly layer = Layer.effect(SubagentHost, TestSubagentHost).pipe(
-    Layer.provideMerge(Layer.effect(TestSubagentHost, TestSubagentHost.make)),
+    Layer.provideMerge(TestSubagentHost.layerNoDeps),
   );
 }

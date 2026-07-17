@@ -18,12 +18,12 @@ it.describe("SubagentSupervisor", () => {
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-start");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const started = yield* supervisor
         .start(subagentId, {
-          title: "Review API",
-          prompt: "Complete the task.",
+          executable: "pi",
+          args: ["--name", "Review API", "Complete the task."],
           cwd: "/worktree",
         })
         .pipe(Effect.forkChild({ startImmediately: true }));
@@ -60,10 +60,14 @@ it.describe("SubagentSupervisor", () => {
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-duplicate");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const start = supervisor
-        .start(subagentId, { title: "Review API", prompt: "Complete the task.", cwd: "/worktree" })
+        .start(subagentId, {
+          executable: "pi",
+          args: ["--name", "Review API", "Complete the task."],
+          cwd: "/worktree",
+        })
         .pipe(
           Effect.as("started" as const),
           Effect.catchTag("SubagentAlreadyStartedError", Effect.succeed),
@@ -102,12 +106,12 @@ it.describe("SubagentSupervisor", () => {
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-registry");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const started = yield* supervisor
         .start(subagentId, {
-          title: "Review API",
-          prompt: "Complete the task.",
+          executable: "pi",
+          args: ["--name", "Review API", "Complete the task."],
           cwd: "/worktree",
         })
         .pipe(Effect.forkChild({ startImmediately: true }));
@@ -154,12 +158,12 @@ it.describe("SubagentSupervisor", () => {
         Effect.forkChild({ startImmediately: true }),
       );
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const started = yield* supervisor
         .start(subagentId, {
-          title: "Review API",
-          prompt: "Complete the task.",
+          executable: "pi",
+          args: ["--name", "Review API", "Complete the task."],
           cwd: "/worktree",
         })
         .pipe(Effect.forkChild({ startImmediately: true }));
@@ -204,12 +208,12 @@ it.describe("SubagentSupervisor", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_supervisor-cleanup");
       const parentScope = yield* Scope.Scope;
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const started = yield* supervisor
         .start(subagentId, {
-          title: "Review API",
-          prompt: "Complete the task.",
+          executable: "pi",
+          args: ["--name", "Review API", "Complete the task."],
           cwd: "/worktree",
         })
         .pipe(Effect.forkChild({ startImmediately: true }));

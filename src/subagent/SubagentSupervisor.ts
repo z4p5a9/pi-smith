@@ -18,10 +18,10 @@ import type {
   SubagentBridgeProtocolError,
 } from "./SubagentBridge.ts";
 import type { SubagentEvent } from "./SubagentEvent.ts";
+import type { SubagentCommand } from "./SubagentHost.ts";
 import { SubagentId } from "./SubagentId.ts";
 import { type SubagentProcess, spawnSubagentProcess } from "./SubagentProcess.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
-import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export class SubagentAlreadyStartedError extends Schema.TaggedErrorClass<SubagentAlreadyStartedError>()(
   "SubagentAlreadyStartedError",
@@ -92,7 +92,7 @@ const make = Effect.gen(function* () {
   });
 
   const start = Effect.fn("SubagentSupervisor.start")(
-    function* (subagentId: SubagentId, spec: SubagentSpec) {
+    function* (subagentId: SubagentId, command: SubagentCommand) {
       yield* Effect.annotateCurrentSpan({ subagentId });
 
       if (yield* FiberMap.has(children, subagentId)) {
@@ -101,7 +101,7 @@ const make = Effect.gen(function* () {
 
       const childScope = yield* Scope.fork(supervisorScope);
       const exit = yield* Effect.gen(function* () {
-        const process = yield* spawnSubagentProcess(subagentId, spec).pipe(
+        const process = yield* spawnSubagentProcess(subagentId, command).pipe(
           Scope.provide(childScope),
         );
 

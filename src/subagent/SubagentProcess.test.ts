@@ -17,11 +17,11 @@ it.describe("spawnSubagentProcess", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_process-start");
       const parentScope = yield* Scope.Scope;
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const started = yield* spawnSubagentProcess(subagentId, {
-        title: "Review API",
-        prompt: "Complete the task.",
+        executable: "pi",
+        args: ["--name", "Review API", "Complete the task."],
         cwd: "/worktree",
       }).pipe(Effect.forkChild({ startImmediately: true }));
 
@@ -55,11 +55,11 @@ it.describe("spawnSubagentProcess", () => {
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-timeout");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       const result = yield* spawnSubagentProcess(subagentId, {
-        title: "Review API",
-        prompt: "Complete the task.",
+        executable: "pi",
+        args: ["--name", "Review API", "Complete the task."],
         cwd: "/worktree",
       }).pipe(Effect.scoped, Effect.flip, Effect.forkChild({ startImmediately: true }));
 

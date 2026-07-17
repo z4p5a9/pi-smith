@@ -18,7 +18,7 @@ it.describe("SubagentPool", () => {
       const testHost = yield* TestSubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_pool-submit");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
       yield* checkpoint.put({
         subagentId,
         status: "queued",
@@ -64,7 +64,7 @@ it.describe("SubagentPool", () => {
       const missingSubagentId = yield* decodeSubagentId("sa_12345678_pool-missing");
       const probeSubagentId = yield* decodeSubagentId("sa_87654321_pool-missing-probe");
 
-      yield* testHost.stub([{ hostId: "test-host" }]);
+      yield* testHost.stub([null]);
 
       for (let index = 0; index < 10; index++) {
         yield* pool.submit(missingSubagentId, {
@@ -119,7 +119,7 @@ it.describe("SubagentPool", () => {
       const duplicateSubagentId = yield* decodeSubagentId("sa_12345678_pool-duplicate");
       const probeSubagentId = yield* decodeSubagentId("sa_87654321_pool-duplicate-probe");
 
-      yield* testHost.stub([{ hostId: "duplicate-host" }, { hostId: "probe-host" }]);
+      yield* testHost.stub([null, null]);
 
       yield* checkpoint.put({
         subagentId: duplicateSubagentId,
@@ -198,14 +198,14 @@ it.describe("SubagentPool", () => {
       const probeSubagentId = yield* decodeSubagentId("sa_87654321_pool-start-probe");
 
       yield* testHost.stub([
-        ...Array.from({ length: 10 }, () => ({
-          error: SubagentHostUnavailableError.make({
+        ...Array.from({ length: 10 }, () =>
+          SubagentHostUnavailableError.make({
             subagentId: failedSubagentId,
-            host: "cmux-pane" as const,
-            reason: "CMUX unavailable",
+            host: "test",
+            reason: "Host unavailable",
           }),
-        })),
-        { hostId: "probe-host" },
+        ),
+        null,
       ]);
 
       yield* checkpoint.put({
@@ -284,10 +284,7 @@ it.describe("SubagentPool", () => {
       ];
       const probeSubagentId = yield* decodeSubagentId("sa_87654321_probe");
 
-      yield* testHost.stub([
-        ...subagentIds.map((_, index) => ({ hostId: `host-${String(index + 1)}` })),
-        { hostId: "probe-host" },
-      ]);
+      yield* testHost.stub([...subagentIds.map(() => null), null]);
 
       for (const [index, subagentId] of subagentIds.entries()) {
         const title = `Worker ${String(index + 1)}`;

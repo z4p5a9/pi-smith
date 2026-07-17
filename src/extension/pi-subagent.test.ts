@@ -18,7 +18,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -104,7 +104,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -165,7 +165,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* SubagentBridge.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -233,13 +233,88 @@ it.describe("Pi subagent extension", () => {
     );
   });
 
+  it.effect("reports an aborted assistant response", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
+
+    return Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const listener = yield* SubagentBridge.listen(subagentId);
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
+      const starting = yield* Effect.promise(() => start()).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const session = yield* listener.accept;
+
+      yield* Fiber.join(starting);
+
+      const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
+      sessionManager.appendMessage({
+        role: "assistant",
+        content: [],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "test-model",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "aborted",
+        timestamp: 0,
+      });
+      let shutdownRequested = false;
+      const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
+      const settling = yield* Effect.promise(() =>
+        settle(
+          { type: "agent_settled" },
+          {
+            sessionManager,
+            shutdown: () => {
+              shutdownRequested = true;
+            },
+          },
+        ),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
+      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      expect(report.event).toEqual({ kind: "failed", reason: "Request aborted" });
+      expect(shutdownRequested).toBe(false);
+
+      yield* report.acknowledge;
+      yield* Fiber.join(settling);
+      expect(shutdownRequested).toBe(true);
+
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+
+      yield* Effect.promise(() => shutdown());
+      yield* session.await;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        unixSocketSubagentBridgeTransportLayer.pipe(Layer.provide(NodeFileSystem.layer)),
+      ),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
+
   it.effect("rejects a missing subagent ID", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
 
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -256,7 +331,7 @@ it.describe("Pi subagent extension", () => {
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -273,7 +348,7 @@ it.describe("Pi subagent extension", () => {
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./PiSubagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),

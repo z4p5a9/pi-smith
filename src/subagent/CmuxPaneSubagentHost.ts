@@ -10,7 +10,6 @@ import {
   SubagentHostUnavailableError,
   type SubagentCommand,
 } from "./SubagentHost.ts";
-import type { SubagentSpec } from "./SubagentSpec.ts";
 
 const encodeCmuxRpcParams = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -90,7 +89,6 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
         return yield* SubagentHostStartError.make({
           subagentId,
           host: "cmux-pane",
-          exitCode: result.exitCode,
           reason: result.stderr.trim(),
         });
       }
@@ -126,12 +124,11 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
 
     const start = Effect.fn("SubagentHost.start")(function* (
       subagentId: SubagentId,
-      _spec: SubagentSpec,
       command: SubagentCommand,
     ) {
       yield* Effect.annotateCurrentSpan({ subagentId, host: "cmux-pane" });
 
-      const response = yield* Effect.acquireRelease(
+      yield* Effect.acquireRelease(
         create(subagentId, command, root.workspaceId, root.surfaceId),
         (pane) =>
           close(root.workspaceId, pane.surface_id).pipe(
@@ -144,7 +141,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
           ),
       );
 
-      return { hostId: response.surface_id };
+      return yield* Effect.void;
     });
 
     return { start };
