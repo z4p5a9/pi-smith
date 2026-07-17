@@ -3,7 +3,47 @@
 Smith is an experimental sub-agent extension for the Pi coding agent, built with Effect v4.
 Its name references Agent Smith from _The Matrix_.
 
-The extension is private and contains only its project scaffold. Its sub-agent architecture has not been selected or documented yet.
+The root agent creates a sub-agent with a title and prompt. Smith launches it in a separate execution environment, supervises its lifetime, communicates with it, and delivers its response back into the root agent's context.
+
+This project is green-filled and currently in alpha so everything is subject to change.
+
+## Current state
+
+Smith currently:
+
+- runs Pi sub-agents in dedicated CMUX panes;
+- supports up to ten live sub-agents through a FIFO worker pool;
+- generates stable sub-agent IDs and records queued, starting, running, and failed projections in an in-memory checkpoint;
+- maintains an in-memory registry of live processes;
+- owns process lifetimes through scoped supervision and deterministic cleanup;
+- communicates between root and child through an acknowledged Unix-socket protocol;
+- contains malformed connection attempts without poisoning the listener;
+- delivers child messages and failures as hidden root-context messages with UI notifications;
+- runs each child ephemerally: one prompt, one settled report, then graceful shutdown;
+- releases the process, host, registry entry, and worker capacity when the child terminates.
+
+The current implementation supports only the Pi harness and CMUX pane host. It has no persistent
+storage, resumption, follow-up messaging, stop controls, workflow scripting, widget, or complete
+terminal-state projection.
+
+## Intended direction
+
+Smith is intended to become a general sub-agent runtime and orchestration system with:
+
+- multiple hosts, including CMUX, tmux, and microVMs such as Firecracker;
+- multiple harnesses, including Pi, Codex, Claude Code, and future agent systems;
+- persistent checkpoints, recovery across root restarts, and resumable sub-agents;
+- long-lived sub-agents that can become idle and receive additional work;
+- send, interrupt, stop, list, focus, and resume operations;
+- accurate lifecycle projection and a root UI widget;
+- host lifecycle observation, reconciliation, bounded cleanup, and recovery from partial failures;
+- a stable process and communication model independent of the selected host or harness;
+- strong failure isolation, so malformed messages, failed children, unavailable hosts, and cleanup failures remain contained to the affected operation while healthy workers, listeners, and sub-agents continue operating;
+- programmable TypeScript workflows for deterministic, multi-phase sub-agent execution;
+- sequential and parallel sub-agent composition;
+- schema-defined outputs that are parsed, validated, combined, and passed to downstream sub-agents.
+
+The end state supports both interactive delegation and deterministic, typed, failure-tolerant multi-agent workflows.
 
 ## Requirements
 
@@ -32,7 +72,3 @@ npm run dev
 ```
 
 This loads the package root through Pi using `pi -e .`. Run `npm run check` as the authoritative local and CI gate.
-
-## Security
-
-Pi extensions execute with the full permissions of the Pi process. Review the extension and its dependencies before loading it.
