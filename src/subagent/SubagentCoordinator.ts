@@ -2,12 +2,14 @@ import {
   Cause,
   Context,
   Effect,
+  Exit,
   Fiber,
   FiberMap,
   Layer,
   Queue,
   Schema,
   Semaphore,
+  Scope,
   Stream,
 } from "effect";
 
@@ -30,13 +32,9 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
   }>();
   const inbox = yield* Queue.bounded<SubagentEventEnvelope>(10);
   const outbox = yield* Queue.bounded<SubagentEventEnvelope>(10);
+  const coordinatorScope = yield* Scope.Scope;
+  const childrenScope = yield* Scope.fork(coordinatorScope);
   const children = yield* FiberMap.make<SubagentId>();
-
-  yield* Effect.addFinalizer(() =>
-    Effect.all([Queue.shutdown(jobs), Queue.shutdown(inbox), Queue.shutdown(outbox)], {
-      discard: true,
-    }),
-  );
 
   const routeEvent = Effect.fn("SubagentCoordinator.routeEvent")(function* ({
     event,
@@ -60,6 +58,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     subagentId: SubagentId,
     spec: SubagentSpec,
   ) {
+    const childScope = yield* Scope.fork(childrenScope);
     const terminalGate = yield* Semaphore.make(1);
     let terminalAccepted = false;
 
@@ -111,7 +110,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
         discard: true,
       });
     }).pipe(
-      Effect.scoped,
+      Scope.use(childScope),
       Effect.withSpan("SubagentCoordinator.child", { attributes: { subagentId } }),
       Effect.annotateLogs({ subagentId }),
     );
@@ -137,6 +136,18 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
       Queue.take(jobs).pipe(Effect.flatMap(({ spec, subagentId }) => run(subagentId, spec))),
     ).pipe(Effect.forkScoped({ startImmediately: true }));
   }
+
+  yield* Effect.addFinalizer(() =>
+    Queue.shutdown(jobs).pipe(
+      Effect.andThen(FiberMap.clear(children)),
+      Effect.andThen(Scope.close(childrenScope, Exit.void)),
+      Effect.andThen(
+        Effect.all([Queue.shutdown(inbox), Queue.shutdown(outbox)], {
+          discard: true,
+        }),
+      ),
+    ),
+  );
 
   const create = Effect.fn("SubagentCoordinator.create")(function* (spec: SubagentSpec) {
     const subagentId = yield* generateSubagentId(spec.title);

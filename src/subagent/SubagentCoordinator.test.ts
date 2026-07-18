@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Option, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { TestHost } from "../testing/TestHost.ts";
@@ -419,4 +419,70 @@ it.describe("SubagentCoordinator", () => {
       ),
     ),
   );
+
+  it.effect("releases live children when its ManagedRuntime is disposed", () => {
+    const runtime = ManagedRuntime.make(
+      SubagentCoordinator.layer.pipe(
+        Layer.provideMerge(SubagentCheckpoint.layer),
+        Layer.provideMerge(TestHost.layer),
+        Layer.provideMerge(SubagentBridge.layer),
+        Layer.provide(
+          Layer.succeed(
+            SubagentHarness,
+            SubagentHarness.of({
+              makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+            }),
+          ),
+        ),
+        Layer.provide(UnixSocketBridgeTransport.layer),
+        Layer.provide(NodeFileSystem.layer),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      runtime.runFork(
+        SubagentCoordinator.use((coordinator) => coordinator.events.pipe(Stream.runDrain)),
+      );
+
+      const parentScope = yield* Scope.Scope;
+      const childScope = yield* Scope.fork(parentScope);
+      const { bridge, checkpoint, subagentId, testHost } = yield* Effect.promise(() =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const runtimeBridge = yield* SubagentBridge;
+            const runtimeCheckpoint = yield* SubagentCheckpoint;
+            const coordinator = yield* SubagentCoordinator;
+            const runtimeTestHost = yield* TestHost;
+
+            yield* runtimeTestHost.stub([null]);
+
+            const admittedSubagentId = yield* coordinator.create({
+              title: "Interrupted",
+              prompt: "Complete the task.",
+              cwd: "/worktree",
+            });
+
+            expect(yield* runtimeTestHost.takeStart).toBe(admittedSubagentId);
+            return {
+              bridge: runtimeBridge,
+              checkpoint: runtimeCheckpoint,
+              subagentId: admittedSubagentId,
+              testHost: runtimeTestHost,
+            };
+          }),
+        ),
+      );
+
+      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "running"),
+        Stream.runHead,
+      );
+      expect(yield* testHost.active).toEqual([subagentId]);
+      yield* Effect.promise(() => runtime.dispose());
+      expect(yield* testHost.active).toEqual([]);
+      expect((yield* checkpoint.get(subagentId)).status).toBe("running");
+      yield* testHost.verify;
+    }).pipe(Effect.ensuring(Effect.promise(() => runtime.dispose())));
+  });
 });
