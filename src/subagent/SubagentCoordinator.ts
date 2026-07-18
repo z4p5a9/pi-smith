@@ -30,29 +30,10 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     readonly subagentId: SubagentId;
     readonly spec: SubagentSpec;
   }>();
-  const inbox = yield* Queue.bounded<SubagentEventEnvelope>(10);
-  const outbox = yield* Queue.bounded<SubagentEventEnvelope>(10);
+  const events = yield* Queue.bounded<SubagentEventEnvelope>(10);
   const coordinatorScope = yield* Scope.Scope;
   const childrenScope = yield* Scope.fork(coordinatorScope);
   const children = yield* FiberMap.make<SubagentId>();
-
-  const routeEvent = Effect.fn("SubagentCoordinator.routeEvent")(function* ({
-    event,
-    subagentId,
-  }: SubagentEventEnvelope) {
-    yield* checkpoint.update(subagentId, {
-      status: event.kind,
-      latestEvent: event,
-    });
-    yield* Queue.offer(outbox, { subagentId, event });
-  });
-
-  yield* Effect.forever(
-    Queue.take(inbox).pipe(
-      Effect.flatMap(routeEvent),
-      Effect.catch((error) => Effect.logError("Failed to route subagent event", error)),
-    ),
-  ).pipe(Effect.forkScoped({ startImmediately: true }));
 
   const run = Effect.fn("SubagentCoordinator.run")(function* (
     subagentId: SubagentId,
@@ -75,7 +56,14 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
               );
             }
 
-            return restore(Queue.offer(inbox, { subagentId, event })).pipe(
+            return restore(
+              checkpoint
+                .update(subagentId, {
+                  status: event.kind,
+                  latestEvent: event,
+                })
+                .pipe(Effect.andThen(Queue.offer(events, { subagentId, event }))),
+            ).pipe(
               Effect.andThen(
                 Effect.sync(() => {
                   terminalAccepted = true;
@@ -141,11 +129,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     Queue.shutdown(jobs).pipe(
       Effect.andThen(FiberMap.clear(children)),
       Effect.andThen(Scope.close(childrenScope, Exit.void)),
-      Effect.andThen(
-        Effect.all([Queue.shutdown(inbox), Queue.shutdown(outbox)], {
-          discard: true,
-        }),
-      ),
+      Effect.andThen(Queue.shutdown(events)),
     ),
   );
 
@@ -160,7 +144,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
 
   return {
     create,
-    events: Stream.fromQueue(outbox),
+    events: Stream.fromQueue(events),
   };
 });
 
