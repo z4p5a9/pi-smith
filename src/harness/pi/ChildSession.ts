@@ -1,5 +1,5 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { Context, Effect, Layer, Scope } from "effect";
+import { Context, Effect, Layer, Scope, Stream } from "effect";
 
 import { SubagentBridge, type SubagentBridgeChildSession } from "../../host/bridge/Bridge.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
@@ -65,6 +65,9 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
   return {
     start,
     sendSettled,
+    messages: Stream.unwrap(
+      Effect.sync(() => (session === undefined ? Stream.empty : session.messages)),
+    ),
     await: Effect.suspend(() => (session === undefined ? Effect.void : session.await)),
   };
 });

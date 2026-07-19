@@ -3,8 +3,7 @@ import { Schema } from "effect";
 import { SubagentEvent } from "../../subagent/SubagentEvent.ts";
 import { SubagentId } from "../../subagent/SubagentId.ts";
 
-export const maxSubagentBridgeChildFrameBytes = 1024 * 1024;
-export const maxSubagentBridgeAcknowledgementBytes = 256;
+export const maxSubagentBridgeFrameBytes = 1024 * 1024;
 
 export const SubagentBridgeHelloFrame = Schema.Struct({
   kind: Schema.Literal("hello"),
@@ -23,11 +22,6 @@ export const SubagentBridgeEventFrame = Schema.Struct({
 
 export type SubagentBridgeEventFrame = typeof SubagentBridgeEventFrame.Type;
 
-export const SubagentBridgeChildFrame = Schema.Union([
-  SubagentBridgeHelloFrame,
-  SubagentBridgeEventFrame,
-]);
-
 export const SubagentBridgeAcknowledgementFrame = Schema.Struct({
   kind: Schema.Literal("ack"),
   version: Schema.Literal(1),
@@ -35,6 +29,26 @@ export const SubagentBridgeAcknowledgementFrame = Schema.Struct({
 });
 
 export type SubagentBridgeAcknowledgementFrame = typeof SubagentBridgeAcknowledgementFrame.Type;
+
+export const SubagentBridgeMessageFrame = Schema.Struct({
+  kind: Schema.Literal("message"),
+  version: Schema.Literal(1),
+  subagentId: SubagentId,
+  content: Schema.String,
+});
+
+export type SubagentBridgeMessageFrame = typeof SubagentBridgeMessageFrame.Type;
+
+export const SubagentBridgeChildFrame = Schema.Union([
+  SubagentBridgeHelloFrame,
+  SubagentBridgeEventFrame,
+  SubagentBridgeAcknowledgementFrame,
+]);
+
+export const SubagentBridgeRootFrame = Schema.Union([
+  SubagentBridgeAcknowledgementFrame,
+  SubagentBridgeMessageFrame,
+]);
 
 export const encodeSubagentBridgeHelloFrame = Schema.encodeEffect(
   Schema.fromJsonString(SubagentBridgeHelloFrame),
@@ -46,4 +60,8 @@ export const encodeSubagentBridgeEventFrame = Schema.encodeEffect(
 
 export const encodeSubagentBridgeAcknowledgementFrame = Schema.encodeEffect(
   Schema.fromJsonString(SubagentBridgeAcknowledgementFrame),
+);
+
+export const encodeSubagentBridgeMessageFrame = Schema.encodeEffect(
+  Schema.fromJsonString(SubagentBridgeMessageFrame),
 );

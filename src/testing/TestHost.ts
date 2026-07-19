@@ -83,7 +83,8 @@ const make = Effect.gen(function* () {
     const session = yield* listener.accept;
 
     return {
-      events: session.events,
+      take: session.take,
+      send: session.send,
       await: session.await,
     } satisfies SubagentHostSession;
   });

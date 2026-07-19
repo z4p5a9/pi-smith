@@ -17,17 +17,21 @@ import {
   encodeSubagentBridgeAcknowledgementFrame,
   encodeSubagentBridgeEventFrame,
   encodeSubagentBridgeHelloFrame,
-  maxSubagentBridgeAcknowledgementBytes,
-  maxSubagentBridgeChildFrameBytes,
-  SubagentBridgeAcknowledgementFrame,
+  encodeSubagentBridgeMessageFrame,
+  maxSubagentBridgeFrameBytes,
   SubagentBridgeChildFrame,
+  SubagentBridgeRootFrame,
 } from "./BridgeProtocol.ts";
 import { SubagentBridgeTransport } from "./BridgeTransport.ts";
 import type { SubagentEvent } from "../../subagent/SubagentEvent.ts";
 import { SubagentId } from "../../subagent/SubagentId.ts";
 
 export interface SubagentBridgeRootSession {
-  readonly events: Stream.Stream<SubagentEvent>;
+  readonly take: Effect.Effect<
+    SubagentEvent,
+    SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
+  >;
+  readonly send: (content: string) => Effect.Effect<void, SubagentBridgeSendMessageError>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
@@ -36,6 +40,7 @@ export interface SubagentBridgeRootSession {
 
 export interface SubagentBridgeChildSession {
   readonly sendEvent: (event: SubagentEvent) => Effect.Effect<void, SubagentBridgeSendEventError>;
+  readonly messages: Stream.Stream<string>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
@@ -56,6 +61,14 @@ export class SubagentBridgeProtocolError extends Schema.TaggedErrorClass<Subagen
 
 export class SubagentBridgeSendEventError extends Schema.TaggedErrorClass<SubagentBridgeSendEventError>()(
   "SubagentBridgeSendEventError",
+  {
+    subagentId: SubagentId,
+    reason: Schema.String,
+  },
+) {}
+
+export class SubagentBridgeSendMessageError extends Schema.TaggedErrorClass<SubagentBridgeSendMessageError>()(
+  "SubagentBridgeSendMessageError",
   {
     subagentId: SubagentId,
     reason: Schema.String,
@@ -85,10 +98,12 @@ const make = Effect.gen(function* () {
     ) {
       const write = yield* socket.writer;
       const events = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
+      const acknowledgements = yield* Queue.unbounded<void, Cause.Done>();
       const lifetime = yield* Deferred.make<
         void,
         SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
       >();
+      const sendLock = yield* Semaphore.make(1);
       const acknowledgement = yield* encodeSubagentBridgeAcknowledgementFrame({
         kind: "ack",
         version: 1,
@@ -97,8 +112,48 @@ const make = Effect.gen(function* () {
       let frameByteCount = 0;
       let established = false;
 
+      const disconnected = Deferred.await(lifetime).pipe(
+        Effect.andThen(
+          SubagentBridgeDisconnectedError.make({
+            subagentId,
+            reason: "Bridge connection closed",
+          }),
+        ),
+      );
+
+      const send = Effect.fn("SubagentBridge.send")(
+        function* (content: string) {
+          const frame = yield* encodeSubagentBridgeMessageFrame({
+            kind: "message",
+            version: 1,
+            subagentId,
+            content,
+          }).pipe(Effect.orDie);
+          const bytes = encoder.encode(`${frame}\n`);
+
+          if (bytes.byteLength - 1 > maxSubagentBridgeFrameBytes) {
+            return yield* SubagentBridgeSendMessageError.make({
+              subagentId,
+              reason: `Bridge message frame exceeds ${maxSubagentBridgeFrameBytes} bytes`,
+            });
+          }
+
+          yield* Effect.raceFirst(write(bytes), disconnected);
+          yield* Queue.take(acknowledgements).pipe(Effect.catch(() => disconnected));
+          return yield* Effect.void;
+        },
+        (effect) => sendLock.withPermit(effect),
+        Effect.mapError((error) =>
+          SubagentBridgeSendMessageError.make({
+            subagentId,
+            reason: String(error),
+          }),
+        ),
+      );
+
       const session = {
-        events: Stream.fromQueue(events),
+        take: Queue.take(events).pipe(Effect.catch(() => disconnected)),
+        send,
         await: Deferred.await(lifetime),
       } satisfies SubagentBridgeRootSession;
 
@@ -120,6 +175,11 @@ const make = Effect.gen(function* () {
             }
 
             established = true;
+          }
+
+          if (frame.kind === "ack") {
+            yield* Queue.offer(acknowledgements, undefined);
+            return yield* Effect.void;
           }
 
           yield* write(`${acknowledgement}\n`).pipe(
@@ -149,10 +209,10 @@ const make = Effect.gen(function* () {
 
             frameByteCount += 1;
 
-            if (frameByteCount > maxSubagentBridgeChildFrameBytes) {
+            if (frameByteCount > maxSubagentBridgeFrameBytes) {
               return SubagentBridgeProtocolError.make({
                 subagentId,
-                reason: `Bridge child frame exceeds ${maxSubagentBridgeChildFrameBytes} bytes`,
+                reason: `Bridge child frame exceeds ${maxSubagentBridgeFrameBytes} bytes`,
               });
             }
           }
@@ -176,7 +236,7 @@ const make = Effect.gen(function* () {
             reason: String(error),
           }),
         ),
-        Effect.ensuring(Queue.end(events)),
+        Effect.ensuring(Queue.end(events).pipe(Effect.andThen(Queue.end(acknowledgements)))),
         Effect.onExit((connectionExit) =>
           Exit.isFailure(connectionExit) && !Cause.hasInterruptsOnly(connectionExit.cause)
             ? Deferred.failCause(lifetime, connectionExit.cause)
@@ -207,11 +267,17 @@ const make = Effect.gen(function* () {
     const socket = yield* transport.connect(subagentId);
     const write = yield* socket.writer;
     const acknowledgements = yield* Queue.unbounded<void, Cause.Done>();
+    const messages = yield* Queue.unbounded<string, Cause.Done>();
     const lifetime = yield* Deferred.make<
       void,
       SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
     >();
     const sendLock = yield* Semaphore.make(1);
+    const acknowledgement = yield* encodeSubagentBridgeAcknowledgementFrame({
+      kind: "ack",
+      version: 1,
+      subagentId,
+    }).pipe(Effect.orDie);
     let frameByteCount = 0;
 
     const disconnected = Deferred.await(lifetime).pipe(
@@ -223,13 +289,31 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    const handleAcknowledgement = (frame: SubagentBridgeAcknowledgementFrame) =>
-      frame.subagentId === subagentId
-        ? Queue.offer(acknowledgements, undefined).pipe(Effect.asVoid)
-        : SubagentBridgeProtocolError.make({
+    const handleFrame = (frame: typeof SubagentBridgeRootFrame.Type) =>
+      Effect.gen(function* () {
+        if (frame.subagentId !== subagentId) {
+          return yield* SubagentBridgeProtocolError.make({
             subagentId,
             reason: `Expected subagent ID ${subagentId}, received ${frame.subagentId}`,
           });
+        }
+
+        if (frame.kind === "ack") {
+          yield* Queue.offer(acknowledgements, undefined);
+          return yield* Effect.void;
+        }
+
+        yield* write(`${acknowledgement}\n`).pipe(
+          Effect.mapError((error) =>
+            SubagentBridgeProtocolError.make({
+              subagentId,
+              reason: error.message,
+            }),
+          ),
+        );
+        yield* Queue.offer(messages, frame.content);
+        return yield* Effect.void;
+      });
 
     yield* Stream.never.pipe(
       Stream.pipeThroughChannel(Socket.toChannel(socket)),
@@ -242,18 +326,18 @@ const make = Effect.gen(function* () {
 
           frameByteCount += 1;
 
-          if (frameByteCount > maxSubagentBridgeAcknowledgementBytes) {
+          if (frameByteCount > maxSubagentBridgeFrameBytes) {
             return SubagentBridgeProtocolError.make({
               subagentId,
-              reason: `Bridge acknowledgement exceeds ${maxSubagentBridgeAcknowledgementBytes} bytes`,
+              reason: `Bridge root frame exceeds ${maxSubagentBridgeFrameBytes} bytes`,
             });
           }
         }
 
         return Effect.succeed(chunk);
       }),
-      Stream.pipeThroughChannel(Ndjson.decodeSchema(SubagentBridgeAcknowledgementFrame)()),
-      Stream.runForEach(handleAcknowledgement),
+      Stream.pipeThroughChannel(Ndjson.decodeSchema(SubagentBridgeRootFrame)()),
+      Stream.runForEach(handleFrame),
       Effect.catchReason("SocketError", "SocketCloseError", (reason, error) =>
         reason.code === 1000 ? Effect.void : Effect.fail(error),
       ),
@@ -269,7 +353,7 @@ const make = Effect.gen(function* () {
           reason: String(error),
         }),
       ),
-      Effect.ensuring(Queue.end(acknowledgements)),
+      Effect.ensuring(Queue.end(acknowledgements).pipe(Effect.andThen(Queue.end(messages)))),
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
           ? Deferred.failCause(lifetime, exit.cause)
@@ -307,10 +391,10 @@ const make = Effect.gen(function* () {
         }).pipe(Effect.orDie);
         const bytes = encoder.encode(`${frame}\n`);
 
-        if (bytes.byteLength - 1 > maxSubagentBridgeChildFrameBytes) {
+        if (bytes.byteLength - 1 > maxSubagentBridgeFrameBytes) {
           return yield* SubagentBridgeSendEventError.make({
             subagentId,
-            reason: `Bridge event frame exceeds ${maxSubagentBridgeChildFrameBytes} bytes`,
+            reason: `Bridge event frame exceeds ${maxSubagentBridgeFrameBytes} bytes`,
           });
         }
 
@@ -329,6 +413,7 @@ const make = Effect.gen(function* () {
 
     return {
       sendEvent,
+      messages: Stream.fromQueue(messages),
       await: Deferred.await(lifetime),
     } satisfies SubagentBridgeChildSession;
   });

@@ -1,10 +1,24 @@
-import { Context, Effect, Layer, Queue, Stream } from "effect";
+import { Context, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import type { SubagentEventEnvelope } from "./SubagentEvent.ts";
-import { generateSubagentId, type SubagentId } from "./SubagentId.ts";
-import { makeSubagentProcess } from "./SubagentProcess.ts";
+import { generateSubagentId, SubagentId } from "./SubagentId.ts";
+import { makeSubagentProcess, type SubagentProcess } from "./SubagentProcess.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
+
+export class SubagentUnknownError extends Schema.TaggedErrorClass<SubagentUnknownError>()(
+  "SubagentUnknownError",
+  {
+    subagentId: SubagentId,
+  },
+) {}
+
+export class SubagentInactiveError extends Schema.TaggedErrorClass<SubagentInactiveError>()(
+  "SubagentInactiveError",
+  {
+    subagentId: SubagentId,
+  },
+) {}
 
 interface Admission {
   readonly subagentId: SubagentId;
@@ -15,8 +29,10 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
   const checkpoint = yield* SubagentCheckpoint;
   const admissions = yield* Queue.unbounded<Admission>();
   const events = yield* Queue.unbounded<SubagentEventEnvelope>();
+  const children = yield* FiberMap.make<SubagentId>();
+  const registry = new Map<SubagentId, SubagentProcess>();
 
-  const worker = Effect.forever(
+  yield* Effect.forever(
     Effect.gen(function* () {
       const { spec, subagentId } = yield* Queue.take(admissions);
       const process = yield* makeSubagentProcess(subagentId, spec);
@@ -24,19 +40,21 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
         Stream.runForEach((event) => Queue.offer(events, { subagentId, event })),
       );
 
-      yield* Effect.all([process.run, aggregate], {
-        concurrency: "unbounded",
-        discard: true,
-      });
+      registry.set(subagentId, process);
+      yield* FiberMap.run(
+        children,
+        subagentId,
+        Effect.all([process.run, aggregate], { concurrency: "unbounded", discard: true }),
+        { startImmediately: true },
+      );
     }),
-  );
-
-  for (let index = 0; index < 10; index++) {
-    yield* worker.pipe(Effect.forkScoped({ startImmediately: true }));
-  }
+  ).pipe(Effect.forkScoped({ startImmediately: true }));
 
   yield* Effect.addFinalizer(() =>
-    Queue.shutdown(admissions).pipe(Effect.andThen(Queue.shutdown(events))),
+    Queue.shutdown(admissions).pipe(
+      Effect.andThen(FiberMap.clear(children)),
+      Effect.andThen(Queue.shutdown(events)),
+    ),
   );
 
   const create = Effect.fn("SubagentCoordinator.create")(function* (spec: SubagentSpec) {
@@ -48,8 +66,37 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     return subagentId;
   });
 
+  const send = Effect.fn("SubagentCoordinator.send")(function* (
+    subagentId: SubagentId,
+    content: string,
+  ) {
+    const process = registry.get(subagentId);
+
+    if (process === undefined) {
+      return yield* SubagentUnknownError.make({ subagentId });
+    }
+
+    const delivered = yield* process.send(content);
+
+    if (!delivered) {
+      return yield* SubagentInactiveError.make({ subagentId });
+    }
+
+    return yield* Effect.void;
+  });
+
+  const kill = Effect.fn("SubagentCoordinator.kill")(function* (subagentId: SubagentId) {
+    if (!registry.has(subagentId)) {
+      return yield* SubagentUnknownError.make({ subagentId });
+    }
+
+    return yield* FiberMap.remove(children, subagentId);
+  });
+
   return {
     create,
+    send,
+    kill,
     events: Stream.fromQueue(events),
   };
 });

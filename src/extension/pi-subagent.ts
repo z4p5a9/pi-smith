@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Config, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect";
+import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Stream } from "effect";
 
 import { ChildSession } from "../harness/pi/ChildSession.ts";
 import { SubagentBridge } from "../host/bridge/Bridge.ts";
@@ -29,6 +29,26 @@ export default function extension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     const starting = runtime.runPromise(ChildSession.use((session) => session.start));
+
+    // Root messages become follow-up prompts in the child Pi session.
+    void starting
+      .then(() =>
+        runtime.runPromise(
+          ChildSession.use((session) =>
+            session.messages.pipe(
+              Stream.runForEach((content) =>
+                Effect.sync(() => {
+                  pi.sendMessage(
+                    { customType: "smith-root-message", content, display: true },
+                    { deliverAs: "followUp", triggerTurn: true },
+                  );
+                }),
+              ),
+            ),
+          ),
+        ),
+      )
+      .catch(() => undefined);
 
     // The bridge connection ending means the root released this subagent.
     void starting

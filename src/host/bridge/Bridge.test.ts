@@ -7,7 +7,7 @@ import {
   SubagentBridgeDisconnectedError,
   SubagentBridgeSendEventError,
 } from "./Bridge.ts";
-import { maxSubagentBridgeChildFrameBytes } from "./BridgeProtocol.ts";
+import { maxSubagentBridgeFrameBytes } from "./BridgeProtocol.ts";
 import { decodeSubagentId } from "../../subagent/SubagentId.ts";
 import * as UnixSocketBridgeTransport from "./unix/UnixSocketBridgeTransport.ts";
 
@@ -27,7 +27,7 @@ it.describe("SubagentBridge", () => {
 
       yield* child.sendEvent({ kind: "message", content: "Task complete." });
 
-      const event = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const event = yield* root.take;
 
       expect(event).toEqual({ kind: "message", content: "Task complete." });
     }).pipe(
@@ -55,12 +55,40 @@ it.describe("SubagentBridge", () => {
       yield* child.sendEvent({ kind: "message", content: "First." });
       yield* child.sendEvent({ kind: "failure", reason: "Second." });
 
-      const events = yield* root.events.pipe(Stream.take(2), Stream.runCollect);
+      expect(yield* root.take).toEqual({ kind: "message", content: "First." });
+      expect(yield* root.take).toEqual({ kind: "failure", reason: "Second." });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
 
-      expect(events).toEqual([
-        { kind: "message", content: "First." },
-        { kind: "failure", reason: "Second." },
-      ]);
+  it.effect("delivers root messages to the child and acknowledges them", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-send");
+      const listener = yield* bridge.listen(subagentId);
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const root = yield* listener.accept;
+      const child = yield* Fiber.join(connecting);
+
+      yield* root.send("Review the diff.");
+      yield* root.send("Then report back.");
+
+      const messages = yield* child.messages.pipe(Stream.take(2), Stream.runCollect);
+
+      expect(messages).toEqual(["Review the diff.", "Then report back."]);
+
+      yield* child.sendEvent({ kind: "message", content: "Done." });
+
+      expect(yield* root.take).toEqual({ kind: "message", content: "Done." });
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -93,7 +121,7 @@ it.describe("SubagentBridge", () => {
         .pipe(Effect.forkScoped);
 
       const root = yield* listener.accept;
-      const delivered = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const delivered = yield* root.take;
 
       expect(delivered).toEqual({ kind: "message", content: "Task complete." });
     }).pipe(
@@ -124,7 +152,7 @@ it.describe("SubagentBridge", () => {
 
       yield* child.sendEvent({ kind: "message", content: "Still alive." });
 
-      const event = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const event = yield* root.take;
 
       expect(event).toEqual({ kind: "message", content: "Still alive." });
     }).pipe(
@@ -249,7 +277,7 @@ it.describe("SubagentBridge", () => {
       const write = yield* socket.writer;
       const invalidConnection = yield* socket
         .run(() => undefined, {
-          onOpen: write("x".repeat(maxSubagentBridgeChildFrameBytes + 1)).pipe(Effect.orDie),
+          onOpen: write("x".repeat(maxSubagentBridgeFrameBytes + 1)).pipe(Effect.orDie),
         })
         .pipe(Effect.forkScoped);
 
@@ -286,7 +314,7 @@ it.describe("SubagentBridge", () => {
       const error = yield* child
         .sendEvent({
           kind: "message",
-          content: "x".repeat(maxSubagentBridgeChildFrameBytes + 1),
+          content: "x".repeat(maxSubagentBridgeFrameBytes + 1),
         })
         .pipe(Effect.flip);
 

@@ -155,7 +155,8 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
         const session = yield* listener.accept;
 
         return {
-          events: session.events,
+          take: session.take,
+          send: session.send,
           await: session.await,
         } satisfies SubagentHostSession;
       },

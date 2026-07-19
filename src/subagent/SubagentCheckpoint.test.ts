@@ -20,6 +20,7 @@ it.describe("SubagentCheckpoint", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral" as const,
       });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
@@ -34,6 +35,7 @@ it.describe("SubagentCheckpoint", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral" as const,
       };
 
       yield* checkpoint.put(record);
@@ -55,6 +57,7 @@ it.describe("SubagentCheckpoint", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral" as const,
       });
       yield* checkpoint.update(subagentId, {
         status: "completed",
@@ -89,6 +92,7 @@ it.describe("SubagentCheckpoint", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral" as const,
       };
 
       yield* checkpoint.put(record);
@@ -118,6 +122,7 @@ it.describe("SubagentCheckpoint", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral" as const,
       };
 
       yield* checkpoint.put(record);

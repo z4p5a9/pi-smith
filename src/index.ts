@@ -16,6 +16,7 @@ import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
 import { SubagentBridge } from "./host/bridge/Bridge.ts";
 import * as UnixSocketBridgeTransport from "./host/bridge/unix/UnixSocketBridgeTransport.ts";
 import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
+import { SubagentCapacity } from "./subagent/SubagentCapacity.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
 
@@ -47,6 +48,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   const runtime = ManagedRuntime.make(
     SubagentCoordinator.layer.pipe(
+      Layer.provide(SubagentCapacity.layer(10)),
       Layer.provide(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
       Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
@@ -130,7 +132,7 @@ export default function extension(pi: ExtensionAPI): void {
       return runtime.runPromise(
         Effect.gen(function* () {
           const coordinator = yield* SubagentCoordinator;
-          const spec = { title, prompt, cwd: ctx.cwd };
+          const spec = { title, prompt, cwd: ctx.cwd, mode: "ephemeral" as const };
           const subagentId = yield* coordinator.create(spec);
 
           return {

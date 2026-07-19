@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, PlatformError, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, PlatformError, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 
 import { TestChildProcessSpawner } from "../../testing/TestChildProcessSpawner.ts";
@@ -61,7 +61,7 @@ it.describe("CmuxPaneHost", () => {
 
       yield* child.sendEvent({ kind: "message", content: "Task complete." });
 
-      const event = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const event = yield* session.take;
 
       expect(event).toEqual({ kind: "message", content: "Task complete." });
 

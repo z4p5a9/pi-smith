@@ -8,8 +8,13 @@ import { SubagentBridge } from "../host/bridge/Bridge.ts";
 import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
 import { SubagentHarness } from "../harness/Harness.ts";
 import { SubagentHostUnavailableError } from "../host/Host.ts";
+import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
-import { SubagentCoordinator } from "./SubagentCoordinator.ts";
+import {
+  SubagentCoordinator,
+  SubagentInactiveError,
+  SubagentUnknownError,
+} from "./SubagentCoordinator.ts";
 import { decodeSubagentId, type SubagentId } from "./SubagentId.ts";
 
 it.describe("SubagentCoordinator", () => {
@@ -26,6 +31,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       expect(yield* testHost.takeStart).toBe(subagentId);
@@ -47,6 +53,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
         latestEvent: { kind: "message", content: "Task complete." },
       });
 
@@ -78,6 +85,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -104,6 +112,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Unavailable",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       const { event, subagentId } = yield* coordinator.events.pipe(
@@ -132,6 +141,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -152,6 +162,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Failed task",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       expect(yield* testHost.takeStart).toBe(subagentId);
@@ -186,6 +197,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -208,6 +220,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Disconnect",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       expect(yield* testHost.takeStart).toBe(subagentId);
@@ -242,6 +255,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -265,6 +279,7 @@ it.describe("SubagentCoordinator", () => {
             title: `Worker ${String(index + 1)}`,
             prompt: "Complete the task.",
             cwd: "/worktree",
+            mode: "ephemeral",
           }),
       );
       const started: Array<SubagentId> = [];
@@ -304,6 +319,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -325,6 +341,7 @@ it.describe("SubagentCoordinator", () => {
         title: "Race",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       expect(yield* testHost.takeStart).toBe(subagentId);
@@ -367,6 +384,165 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("routes sends to a persistent subagent and aggregates its turns", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const checkpoint = yield* SubagentCheckpoint;
+      const coordinator = yield* SubagentCoordinator;
+      const testHost = yield* TestHost;
+
+      yield* testHost.stub([null]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Assistant",
+        prompt: "Stand by.",
+        cwd: "/worktree",
+        mode: "persistent",
+      });
+
+      expect(yield* testHost.takeStart).toBe(subagentId);
+
+      const child = yield* bridge.connect(subagentId);
+
+      yield* child.sendEvent({ kind: "message", content: "Ready." });
+
+      expect(
+        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+      ).toEqual({
+        subagentId,
+        event: { kind: "message", content: "Ready." },
+      });
+
+      yield* coordinator.send(subagentId, "Review the diff.");
+
+      expect(yield* child.messages.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toBe(
+        "Review the diff.",
+      );
+
+      yield* child.sendEvent({ kind: "message", content: "Reviewed." });
+
+      expect(
+        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+      ).toEqual({
+        subagentId,
+        event: { kind: "message", content: "Reviewed." },
+      });
+      expect((yield* checkpoint.get(subagentId)).status).toBe("idle");
+
+      yield* coordinator.kill(subagentId);
+      yield* Effect.suspend(() =>
+        testHost.active.pipe(
+          Effect.flatMap((active) =>
+            active.length === 0 ? Effect.void : Effect.fail("Child is still active"),
+          ),
+        ),
+      ).pipe(Effect.eventually);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("fails sending to an unknown subagent", () =>
+    Effect.gen(function* () {
+      const coordinator = yield* SubagentCoordinator;
+      const subagentId = yield* decodeSubagentId("sa_12345678_unknown");
+      const error = yield* coordinator.send(subagentId, "Hello.").pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(SubagentUnknownError);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("fails sending to a finished subagent", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const coordinator = yield* SubagentCoordinator;
+      const testHost = yield* TestHost;
+
+      yield* testHost.stub([null]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
+      });
+
+      expect(yield* testHost.takeStart).toBe(subagentId);
+
+      const child = yield* bridge.connect(subagentId);
+
+      yield* child.sendEvent({ kind: "message", content: "Task complete." });
+      yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      const error = yield* Effect.suspend(() =>
+        coordinator.send(subagentId, "Too late.").pipe(Effect.flip),
+      ).pipe(Effect.eventually);
+
+      expect(error).toBeInstanceOf(SubagentInactiveError);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -388,6 +564,7 @@ it.describe("SubagentCoordinator", () => {
             title: "Interrupted",
             prompt: "Complete the task.",
             cwd: "/worktree",
+            mode: "ephemeral",
           });
 
           expect(yield* testHost.takeStart).toBe(admittedSubagentId);
@@ -412,6 +589,7 @@ it.describe("SubagentCoordinator", () => {
           ),
         ).pipe(
           Layer.provideMerge(SubagentBridge.layer),
+          Layer.provideMerge(SubagentCapacity.layer(10)),
           Layer.provide(UnixSocketBridgeTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -433,6 +611,7 @@ it.describe("SubagentCoordinator", () => {
             }),
           ),
         ),
+        Layer.provide(SubagentCapacity.layer(10)),
         Layer.provide(UnixSocketBridgeTransport.layer),
         Layer.provide(NodeFileSystem.layer),
       ),
@@ -459,6 +638,7 @@ it.describe("SubagentCoordinator", () => {
               title: "Interrupted",
               prompt: "Complete the task.",
               cwd: "/worktree",
+              mode: "ephemeral",
             });
 
             expect(yield* runtimeTestHost.takeStart).toBe(admittedSubagentId);

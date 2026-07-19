@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 
 import { SubagentBridge } from "../host/bridge/Bridge.ts";
 import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
@@ -74,7 +74,7 @@ it.describe("Pi subagent extension", () => {
         ),
       );
 
-      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const report = yield* session.take;
 
       expect(report).toEqual({
         kind: "message",
@@ -126,7 +126,7 @@ it.describe("Pi subagent extension", () => {
 
       yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
 
-      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const report = yield* session.take;
 
       expect(report).toEqual({
         kind: "failure",
@@ -195,7 +195,7 @@ it.describe("Pi subagent extension", () => {
 
       yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
 
-      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const report = yield* session.take;
 
       expect(report).toEqual({ kind: "failure", reason: "Model request failed" });
 
@@ -260,7 +260,7 @@ it.describe("Pi subagent extension", () => {
 
       yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
 
-      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      const report = yield* session.take;
 
       expect(report).toEqual({ kind: "failure", reason: "Request aborted" });
 

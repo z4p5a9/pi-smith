@@ -16,6 +16,7 @@ it.describe("PiSubagentHarness", () => {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
+        mode: "ephemeral",
       });
 
       expect(command).toEqual({
@@ -45,6 +46,7 @@ it.describe("PiSubagentHarness", () => {
           title: "Review API",
           prompt: "Complete the task.",
           cwd: "/worktree",
+          mode: "ephemeral",
         })
         .pipe(Effect.flip);
 

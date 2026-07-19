@@ -1,8 +1,9 @@
-import { Context, Schema, type Effect, type Scope, type Stream } from "effect";
+import { Context, Schema, type Effect, type Scope } from "effect";
 
 import type {
   SubagentBridgeDisconnectedError,
   SubagentBridgeProtocolError,
+  SubagentBridgeSendMessageError,
 } from "./bridge/Bridge.ts";
 import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
@@ -15,7 +16,11 @@ export interface SubagentCommand {
 }
 
 export interface SubagentHostSession {
-  readonly events: Stream.Stream<SubagentEvent>;
+  readonly take: Effect.Effect<
+    SubagentEvent,
+    SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
+  >;
+  readonly send: (content: string) => Effect.Effect<void, SubagentBridgeSendMessageError>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
