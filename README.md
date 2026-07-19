@@ -12,19 +12,29 @@ This project is green-filled and currently in alpha so everything is subject to 
 Smith currently:
 
 - runs Pi sub-agents in dedicated CMUX panes;
-- supports up to ten live sub-agents through a FIFO worker pool;
-- generates stable sub-agent IDs and records queued, starting, running, and failed projections in an in-memory checkpoint;
-- maintains an in-memory registry of live processes;
-- owns process lifetimes through scoped supervision and deterministic cleanup;
-- communicates between root and child through an acknowledged Unix-socket protocol;
-- contains malformed connection attempts without poisoning the listener;
-- delivers child messages and failures as hidden root-context messages with UI notifications;
-- runs each child ephemerally: one prompt, one settled report, then graceful shutdown;
-- releases the process, host, registry entry, and worker capacity when the child terminates.
+- admits sub-agents through a FIFO queue and executes up to ten concurrently;
+- models each sub-agent as a process that owns its full lifecycle and always resolves a
+  result: exited, failed, or killed — including on interruption;
+- generates stable sub-agent IDs and projects queued, starting, running, completed, and
+  failed states into a best-effort in-memory checkpoint that never gates execution;
+- communicates over a Unix-socket protocol with per-frame identity and version
+  validation, where acknowledgements mean "received" and the first valid frame of any
+  kind establishes the session;
+- contains malformed, oversized, or misidentified connections without poisoning the
+  listener, the pool, or unrelated sub-agents;
+- delivers child messages and failures as hidden root-context messages with UI
+  notifications, aggregated into one root event stream;
+- runs each child ephemerally: one prompt, one report — then the root tears down the
+  Host and the closing pane takes the child with it; children die on transport loss,
+  never by deciding their own shutdown;
+- releases the host, pane, and worker capacity deterministically when a process ends.
 
-The current implementation supports only the Pi harness and CMUX pane host. It has no persistent
-storage, resumption, follow-up messaging, stop controls, workflow scripting, widget, or complete
-terminal-state projection.
+The current implementation supports only the Pi harness and CMUX pane host. It has no
+persistent storage, resumption, follow-up messaging, stop controls, workflow scripting,
+widget, or complete terminal-state projection.
+
+The domain language and boundary map live in `CONTEXT.md`; the decisions behind them in
+`docs/adr/`.
 
 ## Intended direction
 

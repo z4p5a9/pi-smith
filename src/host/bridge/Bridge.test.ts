@@ -1,21 +1,20 @@
 import { NodeFileSystem, NodeSocket } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 
 import {
   SubagentBridge,
   SubagentBridgeDisconnectedError,
-  SubagentBridgeProtocolError,
   SubagentBridgeSendEventError,
 } from "./Bridge.ts";
 import { maxSubagentBridgeChildFrameBytes } from "./BridgeProtocol.ts";
-import { decodeSubagentId } from "../subagent/SubagentId.ts";
+import { decodeSubagentId } from "../../subagent/SubagentId.ts";
 import * as UnixSocketBridgeTransport from "./unix/UnixSocketBridgeTransport.ts";
 
 const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
 it.describe("SubagentBridge", () => {
-  it.effect("accepts hello before delivering one acknowledged event and closing", () =>
+  it.effect("acknowledges an event on receipt and delivers it", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-connect");
@@ -25,22 +24,12 @@ it.describe("SubagentBridge", () => {
         .pipe(Effect.forkChild({ startImmediately: true }));
       const root = yield* listener.accept;
       const child = yield* Fiber.join(connecting);
-      const sent = yield* Deferred.make<void>();
-      const sending = yield* child
-        .sendEvent({ kind: "completed", report: "Task complete." })
-        .pipe(
-          Effect.andThen(Deferred.succeed(sent, undefined)),
-          Effect.forkChild({ startImmediately: true }),
-        );
-      const delivery = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(delivery.event).toEqual({ kind: "completed", report: "Task complete." });
-      expect(yield* Deferred.isDone(sent)).toBe(false);
+      yield* child.sendEvent({ kind: "message", content: "Task complete." });
 
-      yield* delivery.acknowledge;
-      yield* Fiber.join(sending);
-      yield* child.close;
-      yield* Effect.all([root.await, child.await]);
+      const event = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      expect(event).toEqual({ kind: "message", content: "Task complete." });
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -52,7 +41,38 @@ it.describe("SubagentBridge", () => {
     ),
   );
 
-  it.effect("rejects an event before hello without poisoning the listener", () =>
+  it.effect("delivers multiple events in order", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-multiple");
+      const listener = yield* bridge.listen(subagentId);
+      const connecting = yield* bridge
+        .connect(subagentId)
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const root = yield* listener.accept;
+      const child = yield* Fiber.join(connecting);
+
+      yield* child.sendEvent({ kind: "message", content: "First." });
+      yield* child.sendEvent({ kind: "failure", reason: "Second." });
+
+      const events = yield* root.events.pipe(Stream.take(2), Stream.runCollect);
+
+      expect(events).toEqual([
+        { kind: "message", content: "First." },
+        { kind: "failure", reason: "Second." },
+      ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("surfaces the session on an event-first connection", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_bridge-event-first");
@@ -65,19 +85,48 @@ it.describe("SubagentBridge", () => {
         kind: "event",
         version: 1,
         subagentId,
-        event: { kind: "completed", report: "Task complete." },
+        event: { kind: "message", content: "Task complete." },
       }).pipe(Effect.orDie);
-      const invalidConnection = yield* socket
+
+      yield* socket
         .run(() => undefined, { onOpen: write(`${event}\n`).pipe(Effect.orDie) })
         .pipe(Effect.forkScoped);
 
-      yield* Fiber.await(invalidConnection);
+      const root = yield* listener.accept;
+      const delivered = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
+      expect(delivered).toEqual({ kind: "message", content: "Task complete." });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("fails a second concurrent connection without the established session", () =>
+    Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-second-conn");
+      const listener = yield* bridge.listen(subagentId);
       const connecting = yield* bridge
         .connect(subagentId)
         .pipe(Effect.forkChild({ startImmediately: true }));
-      yield* listener.accept;
-      yield* Fiber.join(connecting);
+      const root = yield* listener.accept;
+      const child = yield* Fiber.join(connecting);
+
+      const secondError = yield* bridge.connect(subagentId).pipe(Effect.flip, Effect.scoped);
+
+      expect(Schema.is(SubagentBridgeDisconnectedError)(secondError)).toBe(true);
+
+      yield* child.sendEvent({ kind: "message", content: "Still alive." });
+
+      const event = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      expect(event).toEqual({ kind: "message", content: "Still alive." });
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -222,42 +271,6 @@ it.describe("SubagentBridge", () => {
     ),
   );
 
-  it.effect("fails the session on a second event", () =>
-    Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
-      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-second-event");
-      const listener = yield* bridge.listen(subagentId);
-      const connecting = yield* bridge
-        .connect(subagentId)
-        .pipe(Effect.forkChild({ startImmediately: true }));
-      const root = yield* listener.accept;
-      const child = yield* Fiber.join(connecting);
-      const first = yield* child
-        .sendEvent({ kind: "completed", report: "Task complete." })
-        .pipe(Effect.forkChild({ startImmediately: true }));
-      const delivery = yield* root.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
-
-      yield* delivery.acknowledge;
-      yield* Fiber.join(first);
-
-      const sendError = yield* child
-        .sendEvent({ kind: "failed", reason: "Duplicate." })
-        .pipe(Effect.flip);
-      const rootError = yield* root.await.pipe(Effect.flip);
-
-      expect(Schema.is(SubagentBridgeSendEventError)(sendError)).toBe(true);
-      expect(Schema.is(SubagentBridgeProtocolError)(rootError)).toBe(true);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
-    ),
-  );
-
   it.effect("rejects an oversized event before sending it", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
@@ -271,7 +284,10 @@ it.describe("SubagentBridge", () => {
 
       const child = yield* Fiber.join(connecting);
       const error = yield* child
-        .sendEvent({ kind: "completed", report: "x".repeat(maxSubagentBridgeChildFrameBytes + 1) })
+        .sendEvent({
+          kind: "message",
+          content: "x".repeat(maxSubagentBridgeChildFrameBytes + 1),
+        })
         .pipe(Effect.flip);
 
       expect(Schema.is(SubagentBridgeSendEventError)(error)).toBe(true);
@@ -286,34 +302,27 @@ it.describe("SubagentBridge", () => {
     ),
   );
 
-  it.effect("distinguishes unexpected EOF from graceful close", () =>
+  it.effect("settles both sessions when the child connection closes", () =>
     Effect.gen(function* () {
       const bridge = yield* SubagentBridge;
-      const disconnectedId = yield* decodeSubagentId("sa_12345678_bridge-disconnect");
-      const disconnectedListener = yield* bridge.listen(disconnectedId);
+      const subagentId = yield* decodeSubagentId("sa_12345678_bridge-disconnect");
+      const listener = yield* bridge.listen(subagentId);
       const childScope = yield* Scope.make();
       const connecting = yield* bridge
-        .connect(disconnectedId)
+        .connect(subagentId)
         .pipe(Scope.provide(childScope), Effect.forkChild({ startImmediately: true }));
-      const disconnectedRoot = yield* disconnectedListener.accept;
+      const root = yield* listener.accept;
+      const child = yield* Fiber.join(connecting);
 
-      yield* Fiber.join(connecting);
       yield* Scope.close(childScope, Exit.void);
+      yield* root.await.pipe(Effect.exit);
+      yield* child.await.pipe(Effect.exit);
 
-      expect(
-        Schema.is(SubagentBridgeDisconnectedError)(yield* disconnectedRoot.await.pipe(Effect.flip)),
-      ).toBe(true);
+      const sendError = yield* child
+        .sendEvent({ kind: "message", content: "Too late." })
+        .pipe(Effect.flip);
 
-      const closedId = yield* decodeSubagentId("sa_87654321_bridge-close");
-      const closedListener = yield* bridge.listen(closedId);
-      const closedConnecting = yield* bridge
-        .connect(closedId)
-        .pipe(Effect.forkChild({ startImmediately: true }));
-      const closedRoot = yield* closedListener.accept;
-      const closedChild = yield* Fiber.join(closedConnecting);
-
-      yield* closedChild.close;
-      yield* Effect.all([closedRoot.await, closedChild.await]);
+      expect(Schema.is(SubagentBridgeSendEventError)(sendError)).toBe(true);
     }).pipe(
       Effect.scoped,
       Effect.provide(

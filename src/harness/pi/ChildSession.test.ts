@@ -2,8 +2,8 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
-import { SubagentBridge } from "../../bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../../bridge/unix/UnixSocketBridgeTransport.ts";
+import { SubagentBridge } from "../../host/bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../../host/bridge/unix/UnixSocketBridgeTransport.ts";
 import { decodeSubagentId } from "../../subagent/SubagentId.ts";
 import { ChildSession } from "./ChildSession.ts";
 

@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
-import { SubagentEvent } from "../subagent/SubagentEvent.ts";
-import { SubagentId } from "../subagent/SubagentId.ts";
+import { SubagentEvent } from "../../subagent/SubagentEvent.ts";
+import { SubagentId } from "../../subagent/SubagentId.ts";
 
 export const maxSubagentBridgeChildFrameBytes = 1024 * 1024;
 export const maxSubagentBridgeAcknowledgementBytes = 256;
@@ -23,18 +23,9 @@ export const SubagentBridgeEventFrame = Schema.Struct({
 
 export type SubagentBridgeEventFrame = typeof SubagentBridgeEventFrame.Type;
 
-export const SubagentBridgeCloseFrame = Schema.Struct({
-  kind: Schema.Literal("close"),
-  version: Schema.Literal(1),
-  subagentId: SubagentId,
-});
-
-export type SubagentBridgeCloseFrame = typeof SubagentBridgeCloseFrame.Type;
-
 export const SubagentBridgeChildFrame = Schema.Union([
   SubagentBridgeHelloFrame,
   SubagentBridgeEventFrame,
-  SubagentBridgeCloseFrame,
 ]);
 
 export const SubagentBridgeAcknowledgementFrame = Schema.Struct({
@@ -51,10 +42,6 @@ export const encodeSubagentBridgeHelloFrame = Schema.encodeEffect(
 
 export const encodeSubagentBridgeEventFrame = Schema.encodeEffect(
   Schema.fromJsonString(SubagentBridgeEventFrame),
-);
-
-export const encodeSubagentBridgeCloseFrame = Schema.encodeEffect(
-  Schema.fromJsonString(SubagentBridgeCloseFrame),
 );
 
 export const encodeSubagentBridgeAcknowledgementFrame = Schema.encodeEffect(

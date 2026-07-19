@@ -3,14 +3,14 @@ import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "@effect/vitest";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 
-import { SubagentBridge } from "../bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../bridge/unix/UnixSocketBridgeTransport.ts";
+import { SubagentBridge } from "../host/bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 
 it.describe("Pi subagent extension", () => {
-  it.effect("reports a settled assistant response and shuts down after acknowledgement", () => {
+  it.effect("reports a settled assistant response without shutting itself down", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
@@ -27,9 +27,9 @@ it.describe("Pi subagent extension", () => {
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
 
-      const starting = yield* Effect.promise(() => start()).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const starting = yield* Effect.promise(() =>
+        start({ type: "session_start" }, { shutdown: () => undefined }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
       const session = yield* listener.accept;
 
       yield* Fiber.join(starting);
@@ -61,7 +61,8 @@ it.describe("Pi subagent extension", () => {
       });
       let shutdownRequested = false;
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
-      const settling = yield* Effect.promise(() =>
+
+      yield* Effect.promise(() =>
         settle(
           { type: "agent_settled" },
           {
@@ -71,23 +72,20 @@ it.describe("Pi subagent extension", () => {
             },
           },
         ),
-      ).pipe(Effect.forkChild({ startImmediately: true }));
+      );
+
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(report.event).toEqual({
-        kind: "completed",
-        report: "Task complete.\nFiles updated.",
+      expect(report).toEqual({
+        kind: "message",
+        content: "Task complete.\nFiles updated.",
       });
       expect(shutdownRequested).toBe(false);
-
-      yield* report.acknowledge;
-      yield* Fiber.join(settling);
-      expect(shutdownRequested).toBe(true);
 
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
 
       yield* Effect.promise(() => shutdown());
-      yield* session.await;
+      yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -116,43 +114,29 @@ it.describe("Pi subagent extension", () => {
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
-      const starting = yield* Effect.promise(() => start()).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const starting = yield* Effect.promise(() =>
+        start({ type: "session_start" }, { shutdown: () => undefined }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
       const session = yield* listener.accept;
 
       yield* Fiber.join(starting);
 
       const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
-      let shutdownRequested = false;
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
-      const settling = yield* Effect.promise(() =>
-        settle(
-          { type: "agent_settled" },
-          {
-            sessionManager,
-            shutdown: () => {
-              shutdownRequested = true;
-            },
-          },
-        ),
-      ).pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(report.event).toEqual({
-        kind: "failed",
+      expect(report).toEqual({
+        kind: "failure",
         reason: "Pi settled without an assistant response",
       });
-      expect(shutdownRequested).toBe(false);
-
-      yield* report.acknowledge;
-      yield* Fiber.join(settling);
-      expect(shutdownRequested).toBe(true);
 
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
 
       yield* Effect.promise(() => shutdown());
-      yield* session.await;
+      yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -181,9 +165,9 @@ it.describe("Pi subagent extension", () => {
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
-      const starting = yield* Effect.promise(() => start()).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const starting = yield* Effect.promise(() =>
+        start({ type: "session_start" }, { shutdown: () => undefined }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
       const session = yield* listener.accept;
 
       yield* Fiber.join(starting);
@@ -207,32 +191,18 @@ it.describe("Pi subagent extension", () => {
         errorMessage: "Model request failed",
         timestamp: 0,
       });
-      let shutdownRequested = false;
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
-      const settling = yield* Effect.promise(() =>
-        settle(
-          { type: "agent_settled" },
-          {
-            sessionManager,
-            shutdown: () => {
-              shutdownRequested = true;
-            },
-          },
-        ),
-      ).pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+
       const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(report.event).toEqual({ kind: "failed", reason: "Model request failed" });
-      expect(shutdownRequested).toBe(false);
-
-      yield* report.acknowledge;
-      yield* Fiber.join(settling);
-      expect(shutdownRequested).toBe(true);
+      expect(report).toEqual({ kind: "failure", reason: "Model request failed" });
 
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
 
       yield* Effect.promise(() => shutdown());
-      yield* session.await;
+      yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -261,9 +231,9 @@ it.describe("Pi subagent extension", () => {
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
-      const starting = yield* Effect.promise(() => start()).pipe(
-        Effect.forkChild({ startImmediately: true }),
-      );
+      const starting = yield* Effect.promise(() =>
+        start({ type: "session_start" }, { shutdown: () => undefined }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
       const session = yield* listener.accept;
 
       yield* Fiber.join(starting);
@@ -286,32 +256,73 @@ it.describe("Pi subagent extension", () => {
         stopReason: "aborted",
         timestamp: 0,
       });
-      let shutdownRequested = false;
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
-      const settling = yield* Effect.promise(() =>
-        settle(
-          { type: "agent_settled" },
+
+      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+
+      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      expect(report).toEqual({ kind: "failure", reason: "Request aborted" });
+
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+
+      yield* Effect.promise(() => shutdown());
+      yield* session.await.pipe(Effect.exit);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentBridge.layer.pipe(
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
+
+  it.effect("requests shutdown when the bridge connection ends", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
+
+    return Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const listenerScope = yield* Scope.make();
+      const listener = yield* bridge.listen(subagentId).pipe(Scope.provide(listenerScope));
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
+      let shutdownRequested = false;
+
+      const starting = yield* Effect.promise(() =>
+        start(
+          { type: "session_start" },
           {
-            sessionManager,
             shutdown: () => {
               shutdownRequested = true;
             },
           },
         ),
       ).pipe(Effect.forkChild({ startImmediately: true }));
-      const report = yield* session.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(report.event).toEqual({ kind: "failed", reason: "Request aborted" });
+      yield* listener.accept;
+      yield* Fiber.join(starting);
+
       expect(shutdownRequested).toBe(false);
 
-      yield* report.acknowledge;
-      yield* Fiber.join(settling);
-      expect(shutdownRequested).toBe(true);
+      yield* Scope.close(listenerScope, Exit.void);
+      yield* Effect.suspend(() =>
+        shutdownRequested ? Effect.void : Effect.fail("Shutdown not requested"),
+      ).pipe(Effect.eventually);
 
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
 
       yield* Effect.promise(() => shutdown());
-      yield* session.await;
     }).pipe(
       Effect.scoped,
       Effect.provide(

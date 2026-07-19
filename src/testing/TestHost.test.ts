@@ -1,6 +1,9 @@
+import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 
+import { SubagentBridge } from "../host/bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
 import { SubagentHost, SubagentHostUnavailableError } from "../host/Host.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 import { TestHost } from "./TestHost.ts";
@@ -8,25 +11,30 @@ import { TestHost } from "./TestHost.ts";
 it.describe("TestHost", () => {
   it.effect("stubs and records a scoped host start", () =>
     Effect.gen(function* () {
+      const bridge = yield* SubagentBridge;
       const testHost = yield* TestHost;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_host-start");
+      const parentScope = yield* Scope.Scope;
+      const hostScope = yield* Scope.fork(parentScope);
 
       yield* testHost.stub([null]);
 
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* host.start(subagentId, {
-            executable: "pi",
-            args: ["--name", "Review API"],
-            cwd: "/worktree",
-            env: { SMITH_SUBAGENT_ID: subagentId },
-          });
+      const starting = yield* host
+        .start(subagentId, {
+          executable: "pi",
+          args: ["--name", "Review API"],
+          cwd: "/worktree",
+          env: { SMITH_SUBAGENT_ID: subagentId },
+        })
+        .pipe(Scope.provide(hostScope), Effect.forkChild({ startImmediately: true }));
 
-          expect(yield* testHost.active).toEqual([subagentId]);
-          expect(yield* testHost.takeStart).toBe(subagentId);
-        }),
-      );
+      expect(yield* testHost.takeStart).toBe(subagentId);
+      expect(yield* testHost.active).toEqual([subagentId]);
+
+      yield* bridge.connect(subagentId);
+      yield* Fiber.join(starting);
+      yield* Scope.close(hostScope, Exit.void);
 
       expect(yield* testHost.calls).toEqual([
         {
@@ -41,7 +49,16 @@ it.describe("TestHost", () => {
       ]);
       expect(yield* testHost.active).toEqual([]);
       yield* testHost.verify;
-    }).pipe(Effect.provide(TestHost.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        TestHost.layer.pipe(
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
   );
 
   it.effect("stubs a host start failure without connecting", () =>
@@ -65,6 +82,14 @@ it.describe("TestHost", () => {
       expect(error).toBeInstanceOf(SubagentHostUnavailableError);
       expect(yield* testHost.active).toEqual([]);
       yield* testHost.verify;
-    }).pipe(Effect.provide(TestHost.layer)),
+    }).pipe(
+      Effect.provide(
+        TestHost.layer.pipe(
+          Layer.provideMerge(SubagentBridge.layer),
+          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
   );
 });

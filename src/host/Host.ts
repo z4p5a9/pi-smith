@@ -1,5 +1,10 @@
-import { Context, Schema, type Effect, type Scope } from "effect";
+import { Context, Schema, type Effect, type Scope, type Stream } from "effect";
 
+import type {
+  SubagentBridgeDisconnectedError,
+  SubagentBridgeProtocolError,
+} from "./bridge/Bridge.ts";
+import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
 
 export interface SubagentCommand {
@@ -7,6 +12,14 @@ export interface SubagentCommand {
   readonly args: ReadonlyArray<string>;
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
+}
+
+export interface SubagentHostSession {
+  readonly events: Stream.Stream<SubagentEvent>;
+  readonly await: Effect.Effect<
+    void,
+    SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
+  >;
 }
 
 export class SubagentHostUnavailableError extends Schema.TaggedErrorClass<SubagentHostUnavailableError>()(
@@ -43,7 +56,7 @@ export class SubagentHost extends Context.Service<
       subagentId: SubagentId,
       command: SubagentCommand,
     ) => Effect.Effect<
-      void,
+      SubagentHostSession,
       SubagentHostUnavailableError | SubagentHostStartError | SubagentHostResponseError,
       Scope.Scope
     >;

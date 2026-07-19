@@ -1,7 +1,7 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Context, Effect, Layer, Scope } from "effect";
 
-import { SubagentBridge, type SubagentBridgeChildSession } from "../../bridge/Bridge.ts";
+import { SubagentBridge, type SubagentBridgeChildSession } from "../../host/bridge/Bridge.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 
 const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId) {
@@ -39,14 +39,14 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
 
     if (entry === undefined || entry.type !== "message" || entry.message.role !== "assistant") {
       return yield* session.sendEvent({
-        kind: "failed",
+        kind: "failure",
         reason: "Pi settled without an assistant response",
       });
     }
 
     if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
       return yield* session.sendEvent({
-        kind: "failed",
+        kind: "failure",
         reason: entry.message.errorMessage ?? `Request ${entry.message.stopReason}`,
       });
     }
@@ -59,12 +59,14 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
       }
     }
 
-    return yield* session.sendEvent({ kind: "completed", report: content.join("\n") });
+    return yield* session.sendEvent({ kind: "message", content: content.join("\n") });
   });
 
-  const close = Effect.suspend(() => (session === undefined ? Effect.void : session.close));
-
-  return { start, sendSettled, close };
+  return {
+    start,
+    sendSettled,
+    await: Effect.suspend(() => (session === undefined ? Effect.void : session.await)),
+  };
 });
 
 export class ChildSession extends Context.Service<ChildSession>()(

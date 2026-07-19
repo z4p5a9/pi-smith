@@ -1,15 +1,18 @@
 import { Context, Effect, Layer, Queue, Ref } from "effect";
 
+import { SubagentBridge } from "../host/bridge/Bridge.ts";
 import {
   SubagentHost,
   type SubagentCommand,
   type SubagentHostResponseError,
   type SubagentHostStartError,
+  type SubagentHostSession,
   type SubagentHostUnavailableError,
 } from "../host/Host.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
+  const bridge = yield* SubagentBridge;
   const startCalls = yield* Queue.unbounded<{
     readonly subagentId: SubagentId;
     readonly command: SubagentCommand;
@@ -55,6 +58,8 @@ const make = Effect.gen(function* () {
       return yield* configured;
     }
 
+    const listener = yield* bridge.listen(subagentId).pipe(Effect.orDie);
+
     yield* Effect.acquireRelease(
       Ref.update(state, (prev) => {
         const active = new Set(prev.active);
@@ -75,7 +80,12 @@ const make = Effect.gen(function* () {
 
     yield* Queue.offer(starts, subagentId);
 
-    return yield* Effect.void;
+    const session = yield* listener.accept;
+
+    return {
+      events: session.events,
+      await: session.await,
+    } satisfies SubagentHostSession;
   });
 
   const stub = Effect.fn("TestHost.stub")(function* (

@@ -13,8 +13,8 @@ import {
 import { Type } from "typebox";
 
 import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
-import { SubagentBridge } from "./bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "./bridge/unix/UnixSocketBridgeTransport.ts";
+import { SubagentBridge } from "./host/bridge/Bridge.ts";
+import * as UnixSocketBridgeTransport from "./host/bridge/unix/UnixSocketBridgeTransport.ts";
 import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
 import { SubagentCheckpoint } from "./subagent/SubagentCheckpoint.ts";
 import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
@@ -70,8 +70,8 @@ export default function extension(pi: ExtensionAPI): void {
                 {
                   customType: "smith-subagent",
                   content:
-                    event.kind === "completed"
-                      ? `Subagent ${subagentId} completed:\n\n${event.report}`
+                    event.kind === "message"
+                      ? `Subagent ${subagentId} completed:\n\n${event.content}`
                       : `Subagent ${subagentId} failed:\n\n${event.reason}`,
                   display: false,
                   details: { subagentId, event },
@@ -84,10 +84,10 @@ export default function extension(pi: ExtensionAPI): void {
 
               if (ctx.hasUI) {
                 ctx.ui.notify(
-                  event.kind === "completed"
+                  event.kind === "message"
                     ? `Subagent ${subagentId} completed`
                     : `Subagent ${subagentId} failed`,
-                  event.kind === "completed" ? "info" : "error",
+                  event.kind === "message" ? "info" : "error",
                 );
               }
             }).pipe(

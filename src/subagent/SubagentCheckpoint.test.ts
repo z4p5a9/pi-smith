@@ -58,12 +58,12 @@ it.describe("SubagentCheckpoint", () => {
       });
       yield* checkpoint.update(subagentId, {
         status: "completed",
-        latestEvent: { kind: "completed", report: "Task complete." },
+        latestEvent: { kind: "message", content: "Task complete." },
       });
 
       expect(yield* checkpoint.get(subagentId)).toMatchObject({
         status: "completed",
-        latestEvent: { kind: "completed", report: "Task complete." },
+        latestEvent: { kind: "message", content: "Task complete." },
       });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );

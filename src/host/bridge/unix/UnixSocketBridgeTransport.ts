@@ -6,7 +6,7 @@ import {
   SubagentBridgeListenError,
   SubagentBridgeTransport,
 } from "../BridgeTransport.ts";
-import type { SubagentId } from "../../subagent/SubagentId.ts";
+import type { SubagentId } from "../../../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;

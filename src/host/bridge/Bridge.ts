@@ -1,5 +1,5 @@
 import {
-  type Cause,
+  Cause,
   Context,
   Deferred,
   Effect,
@@ -15,7 +15,6 @@ import * as Socket from "effect/unstable/socket/Socket";
 
 import {
   encodeSubagentBridgeAcknowledgementFrame,
-  encodeSubagentBridgeCloseFrame,
   encodeSubagentBridgeEventFrame,
   encodeSubagentBridgeHelloFrame,
   maxSubagentBridgeAcknowledgementBytes,
@@ -24,25 +23,19 @@ import {
   SubagentBridgeChildFrame,
 } from "./BridgeProtocol.ts";
 import { SubagentBridgeTransport } from "./BridgeTransport.ts";
-import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
-import { SubagentId } from "../subagent/SubagentId.ts";
+import type { SubagentEvent } from "../../subagent/SubagentEvent.ts";
+import { SubagentId } from "../../subagent/SubagentId.ts";
 
 export interface SubagentBridgeRootSession {
-  readonly events: Stream.Stream<SubagentEventDelivery>;
+  readonly events: Stream.Stream<SubagentEvent>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
   >;
 }
 
-export interface SubagentEventDelivery {
-  readonly event: SubagentEvent;
-  readonly acknowledge: Effect.Effect<void>;
-}
-
 export interface SubagentBridgeChildSession {
   readonly sendEvent: (event: SubagentEvent) => Effect.Effect<void, SubagentBridgeSendEventError>;
-  readonly close: Effect.Effect<void, SubagentBridgeCloseError>;
   readonly await: Effect.Effect<
     void,
     SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
@@ -69,14 +62,6 @@ export class SubagentBridgeSendEventError extends Schema.TaggedErrorClass<Subage
   },
 ) {}
 
-export class SubagentBridgeCloseError extends Schema.TaggedErrorClass<SubagentBridgeCloseError>()(
-  "SubagentBridgeCloseError",
-  {
-    subagentId: SubagentId,
-    reason: Schema.String,
-  },
-) {}
-
 export class SubagentBridgeDisconnectedError extends Schema.TaggedErrorClass<SubagentBridgeDisconnectedError>()(
   "SubagentBridgeDisconnectedError",
   {
@@ -97,7 +82,7 @@ const make = Effect.gen(function* () {
     const runConnection = Effect.fn("SubagentBridge.runConnection")(function* (
       socket: Socket.Socket,
     ) {
-      const events = yield* Queue.bounded<SubagentEventDelivery, Cause.Done>(1);
+      const events = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
       const outgoingBytes = yield* Queue.bounded<Uint8Array>(0);
       const lifetime = yield* Deferred.make<
         void,
@@ -105,9 +90,7 @@ const make = Effect.gen(function* () {
       >();
       const encoder = new TextEncoder();
       let frameByteCount = 0;
-      const connection: { state: "pending" | "open" | "terminal" | "closing" } = {
-        state: "pending",
-      };
+      let established = false;
 
       const session = {
         events: Stream.fromQueue(events),
@@ -148,14 +131,7 @@ const make = Effect.gen(function* () {
               });
             }
 
-            if (frame.kind === "hello") {
-              if (connection.state !== "pending") {
-                return yield* SubagentBridgeProtocolError.make({
-                  subagentId,
-                  reason: "Bridge hello has already been received",
-                });
-              }
-
+            if (!established) {
               if (!(yield* Deferred.succeed(accepted, session))) {
                 return yield* SubagentBridgeProtocolError.make({
                   subagentId,
@@ -163,41 +139,11 @@ const make = Effect.gen(function* () {
                 });
               }
 
-              connection.state = "open";
-            } else if (frame.kind === "event") {
-              // oxlint-disable-next-line no-warning-comments -- tracks the planned protocol evolution
-              // TODO: Permit multiple events when persistent subagents define their protocol semantics.
-              if (connection.state === "terminal") {
-                return yield* SubagentBridgeProtocolError.make({
-                  subagentId,
-                  reason: "Bridge protocol version 1 permits one event",
-                });
-              }
+              established = true;
+            }
 
-              if (connection.state !== "open") {
-                return yield* SubagentBridgeProtocolError.make({
-                  subagentId,
-                  reason: "Bridge connection is not open",
-                });
-              }
-
-              connection.state = "terminal";
-              const acknowledged = yield* Deferred.make<void>();
-
-              yield* Queue.offer(events, {
-                event: frame.event,
-                acknowledge: Deferred.succeed(acknowledged, undefined).pipe(Effect.asVoid),
-              });
-              yield* Deferred.await(acknowledged);
-            } else {
-              if (connection.state !== "open" && connection.state !== "terminal") {
-                return yield* SubagentBridgeProtocolError.make({
-                  subagentId,
-                  reason: "Bridge connection is not open",
-                });
-              }
-
-              connection.state = "closing";
+            if (frame.kind === "event") {
+              yield* Queue.offer(events, frame.event);
             }
 
             const acknowledgement = yield* encodeSubagentBridgeAcknowledgementFrame({
@@ -211,7 +157,7 @@ const make = Effect.gen(function* () {
           }),
         ),
         Effect.catchReason("SocketError", "SocketCloseError", (reason, error) =>
-          connection.state === "closing" && reason.code === 1000 ? Effect.void : Effect.fail(error),
+          reason.code === 1000 ? Effect.void : Effect.fail(error),
         ),
         Effect.catchTag("SocketError", (error) =>
           SubagentBridgeDisconnectedError.make({
@@ -225,19 +171,9 @@ const make = Effect.gen(function* () {
             reason: String(error),
           }),
         ),
-        Effect.andThen(
-          Effect.suspend(() =>
-            connection.state === "closing"
-              ? Effect.void
-              : SubagentBridgeDisconnectedError.make({
-                  subagentId,
-                  reason: "Bridge connection closed",
-                }),
-          ),
-        ),
         Effect.ensuring(Queue.end(events)),
         Effect.onExit((connectionExit) =>
-          Exit.isFailure(connectionExit)
+          Exit.isFailure(connectionExit) && !Cause.hasInterruptsOnly(connectionExit.cause)
             ? Deferred.failCause(lifetime, connectionExit.cause)
             : Deferred.succeed(lifetime, undefined).pipe(Effect.asVoid),
         ),
@@ -246,11 +182,11 @@ const make = Effect.gen(function* () {
 
       yield* Exit.match(exit, {
         onFailure: (cause) =>
-          connection.state === "pending"
-            ? Effect.logWarning("Rejected subagent bridge connection", cause).pipe(
+          established
+            ? Effect.void
+            : Effect.logWarning("Rejected subagent bridge connection", cause).pipe(
                 Effect.annotateLogs({ subagentId }),
-              )
-            : Effect.void,
+              ),
         onSuccess: () => Effect.void,
       });
     });
@@ -265,7 +201,7 @@ const make = Effect.gen(function* () {
 
     const socket = yield* transport.connect(subagentId);
     const acknowledgements = yield* Queue.bounded<void>(0);
-    const outgoingBytes = yield* Queue.bounded<Uint8Array, Cause.Done>(0);
+    const outgoingBytes = yield* Queue.bounded<Uint8Array>(0);
     const lifetime = yield* Deferred.make<
       void,
       SubagentBridgeProtocolError | SubagentBridgeDisconnectedError
@@ -273,9 +209,15 @@ const make = Effect.gen(function* () {
     const sendLock = yield* Semaphore.make(1);
     const encoder = new TextEncoder();
     let frameByteCount = 0;
-    const connection: { state: "connecting" | "open" | "closing" | "closed" } = {
-      state: "connecting",
-    };
+
+    const lifetimeEnded = Deferred.await(lifetime).pipe(
+      Effect.andThen(
+        SubagentBridgeDisconnectedError.make({
+          subagentId,
+          reason: "Bridge connection closed",
+        }),
+      ),
+    );
 
     const frames = Stream.fromQueue(outgoingBytes).pipe(
       Stream.pipeThroughChannel(Socket.toChannel(socket)),
@@ -313,7 +255,7 @@ const make = Effect.gen(function* () {
         return Queue.offer(acknowledgements, undefined);
       }),
       Effect.catchReason("SocketError", "SocketCloseError", (reason, error) =>
-        connection.state === "closing" && reason.code === 1000 ? Effect.void : Effect.fail(error),
+        reason.code === 1000 ? Effect.void : Effect.fail(error),
       ),
       Effect.catchTag("SocketError", (error) =>
         SubagentBridgeDisconnectedError.make({
@@ -327,24 +269,11 @@ const make = Effect.gen(function* () {
           reason: String(error),
         }),
       ),
-      Effect.andThen(
-        Effect.suspend(() =>
-          connection.state === "closing"
-            ? Effect.void
-            : SubagentBridgeDisconnectedError.make({
-                subagentId,
-                reason: "Bridge connection closed",
-              }),
-        ),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+          ? Deferred.failCause(lifetime, exit.cause)
+          : Deferred.succeed(lifetime, undefined).pipe(Effect.asVoid),
       ),
-      Effect.onExit((exit) => {
-        if (Exit.isFailure(exit)) {
-          return Deferred.failCause(lifetime, exit.cause);
-        }
-
-        connection.state = "closed";
-        return Deferred.succeed(lifetime, undefined).pipe(Effect.asVoid);
-      }),
       Effect.forkScoped,
     );
 
@@ -356,20 +285,12 @@ const make = Effect.gen(function* () {
 
     yield* Effect.raceFirst(
       Queue.offer(outgoingBytes, encoder.encode(`${hello}\n`)),
-      Deferred.await(lifetime),
+      lifetimeEnded,
     );
-    yield* Effect.raceFirst(Queue.take(acknowledgements), Deferred.await(lifetime));
-    connection.state = "open";
+    yield* Effect.raceFirst(Queue.take(acknowledgements), lifetimeEnded);
 
     const sendEvent = Effect.fn("SubagentBridge.sendEvent")(
       function* (event: SubagentEvent) {
-        if (connection.state !== "open") {
-          return yield* SubagentBridgeSendEventError.make({
-            subagentId,
-            reason: "Bridge connection is not open",
-          });
-        }
-
         const frame = yield* encodeSubagentBridgeEventFrame({
           kind: "event",
           version: 1,
@@ -385,8 +306,8 @@ const make = Effect.gen(function* () {
           });
         }
 
-        yield* Effect.raceFirst(Queue.offer(outgoingBytes, bytes), Deferred.await(lifetime));
-        yield* Effect.raceFirst(Queue.take(acknowledgements), Deferred.await(lifetime));
+        yield* Effect.raceFirst(Queue.offer(outgoingBytes, bytes), lifetimeEnded);
+        yield* Effect.raceFirst(Queue.take(acknowledgements), lifetimeEnded);
         return yield* Effect.void;
       },
       (effect) => sendLock.withPermit(effect),
@@ -398,45 +319,8 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    const close = Effect.gen(function* () {
-      if (connection.state === "closed") {
-        return;
-      }
-
-      if (connection.state === "closing") {
-        yield* Deferred.await(lifetime);
-        return;
-      }
-
-      connection.state = "closing";
-      const frame = yield* encodeSubagentBridgeCloseFrame({
-        kind: "close",
-        version: 1,
-        subagentId,
-      }).pipe(Effect.orDie);
-
-      yield* Effect.raceFirst(
-        Queue.offer(outgoingBytes, encoder.encode(`${frame}\n`)),
-        Deferred.await(lifetime),
-      );
-      yield* Effect.raceFirst(Queue.take(acknowledgements), Deferred.await(lifetime));
-      yield* Queue.end(outgoingBytes);
-      yield* Deferred.await(lifetime);
-      return;
-    }).pipe(
-      (effect) => sendLock.withPermit(effect),
-      Effect.mapError((error) =>
-        SubagentBridgeCloseError.make({
-          subagentId,
-          reason: String(error),
-        }),
-      ),
-      Effect.withSpan("SubagentBridge.close"),
-    );
-
     return {
       sendEvent,
-      close,
       await: Deferred.await(lifetime),
     } satisfies SubagentBridgeChildSession;
   });
@@ -444,7 +328,7 @@ const make = Effect.gen(function* () {
   return { listen, connect };
 });
 
-export class SubagentBridge extends Context.Service<SubagentBridge>()("@smith/bridge/Bridge", {
+export class SubagentBridge extends Context.Service<SubagentBridge>()("@smith/host/bridge/Bridge", {
   make,
 }) {
   static readonly layer = Layer.effect(SubagentBridge, SubagentBridge.make);
