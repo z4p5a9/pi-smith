@@ -22,6 +22,9 @@ it.describe("root extension", () => {
       expect(result.errors).toEqual([]);
       expect(result.extensions).toHaveLength(1);
       expect(result.extensions[0]?.tools.has("subagent")).toBe(true);
+      expect(result.extensions[0]?.tools.has("subagent_send")).toBe(true);
+      expect(result.extensions[0]?.tools.has("subagent_kill")).toBe(true);
+      expect(result.extensions[0]?.tools.has("subagent_status")).toBe(true);
     }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 

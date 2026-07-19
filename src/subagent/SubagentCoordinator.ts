@@ -93,10 +93,19 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     return yield* FiberMap.remove(children, subagentId);
   });
 
+  const status = Effect.fn("SubagentCoordinator.status")(function* (subagentId: SubagentId) {
+    return yield* checkpoint
+      .get(subagentId)
+      .pipe(
+        Effect.catchTag("SubagentNotFoundError", () => SubagentUnknownError.make({ subagentId })),
+      );
+  });
+
   return {
     create,
     send,
     kill,
+    status,
     events: Stream.fromQueue(events),
   };
 });
