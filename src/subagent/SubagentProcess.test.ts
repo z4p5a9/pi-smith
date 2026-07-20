@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope, Semaphore, Stream } from "effect";
 
 import { TestHost } from "../testing/TestHost.ts";
 import * as Protocol from "../host/Protocol.ts";
@@ -35,6 +35,8 @@ it.describe("SubagentProcess", () => {
         cwd: "/worktree",
         mode: "ephemeral",
       });
+      expect(yield* process.send("Ignored.")).toBe(false);
+
       const running = yield* process.run.pipe(Effect.forkChild({ startImmediately: true }));
 
       expect(yield* testHost.takeStart).toBe(subagentId);
@@ -157,20 +159,24 @@ it.describe("SubagentProcess", () => {
     ),
   );
 
-  it.effect("retains acknowledged events across initial and persistent outbox wins", () =>
+  it.effect("retains ordered responses while another command acknowledgement is blocked", () =>
     Effect.gen(function* () {
+      const capacity = yield* Semaphore.make(1);
+      const childEvents = yield* Queue.unbounded<
+        | { readonly kind: "message"; readonly content: string }
+        | { readonly kind: "failure"; readonly reason: string }
+      >();
+      const sent = yield* Queue.unbounded<string>();
       const receiveCount = yield* Ref.make(0);
       const initialAckCompleted = yield* Deferred.make<void>();
       const releaseInitialReturn = yield* Deferred.make<void>();
-      const persistentAckCompleted = yield* Deferred.make<void>();
-      const releasePersistentReturn = yield* Deferred.make<void>();
-      const replacementStarted = yield* Deferred.make<void>();
-      const replacementInterrupted = yield* Deferred.make<void>();
-      const sent = yield* Queue.unbounded<string>();
+      const secondSendStarted = yield* Deferred.make<void>();
+      const releaseSecondSend = yield* Deferred.make<void>();
+      const firstResponseCompleted = yield* Deferred.make<void>();
 
       return yield* Effect.gen(function* () {
         const checkpoint = yield* SubagentCheckpoint;
-        const subagentId = yield* decodeSubagentId("sa_12345678_process-retained-receive");
+        const subagentId = yield* decodeSubagentId("sa_12345678_process-pending");
 
         yield* checkpoint.put({
           subagentId,
@@ -189,44 +195,81 @@ it.describe("SubagentProcess", () => {
         });
         const running = yield* process.run.pipe(Effect.forkChild({ startImmediately: true }));
 
+        yield* Queue.offer(childEvents, { kind: "message", content: "Ready." });
         yield* Deferred.await(initialAckCompleted);
 
-        yield* process.send("First initial steering message.");
-        expect(yield* Queue.take(sent)).toBe("First initial steering message.");
-        expect(yield* Ref.get(receiveCount)).toBe(1);
-
-        yield* process.send("Second initial steering message.");
-        expect(yield* Queue.take(sent)).toBe("Second initial steering message.");
+        yield* process.send("Initial command.");
+        expect(yield* Queue.take(sent)).toBe("Initial command.");
         expect(yield* Ref.get(receiveCount)).toBe(1);
 
         yield* Deferred.succeed(releaseInitialReturn, undefined);
-        yield* Deferred.await(persistentAckCompleted);
-
-        yield* process.send("First persistent steering message.");
-        expect(yield* Queue.take(sent)).toBe("First persistent steering message.");
-        expect(yield* Ref.get(receiveCount)).toBe(2);
-
-        yield* process.send("Second persistent steering message.");
-        expect(yield* Queue.take(sent)).toBe("Second persistent steering message.");
-        expect(yield* Ref.get(receiveCount)).toBe(2);
-
-        yield* Deferred.succeed(releasePersistentReturn, undefined);
-        yield* Deferred.await(replacementStarted);
+        yield* Queue.offer(childEvents, { kind: "message", content: "Initial result." });
+        yield* checkpoint.changes(subagentId).pipe(
+          Stream.filter((record) => record.status === "idle"),
+          Stream.runHead,
+        );
         expect(yield* Ref.get(receiveCount)).toBe(3);
+        const initialEvents = yield* process.events.pipe(Stream.take(2), Stream.runCollect);
+
+        expect(initialEvents).toEqual([
+          { kind: "message", content: "Ready." },
+          { kind: "message", content: "Initial result." },
+        ]);
+
+        yield* process.send("First command.");
+        expect(yield* Queue.take(sent)).toBe("First command.");
+
+        yield* process.send("Second command.");
+        expect(yield* Queue.take(sent)).toBe("Second command.");
+        yield* Deferred.await(secondSendStarted);
+
+        const capacityAcquired = yield* Deferred.make<void>();
+        const capacityWaiter = yield* capacity
+          .withPermit(Deferred.succeed(capacityAcquired, undefined))
+          .pipe(Effect.forkChild({ startImmediately: true }));
+
+        yield* Queue.offer(childEvents, { kind: "message", content: "First result." });
+        yield* Deferred.await(firstResponseCompleted);
+
+        expect((yield* checkpoint.get(subagentId)).status).toBe("running");
+        expect(yield* Deferred.isDone(capacityAcquired)).toBe(false);
+        yield* Deferred.succeed(releaseSecondSend, undefined);
+
+        const firstResult = yield* process.events.pipe(
+          Stream.runHead,
+          Effect.flatMap(Effect.fromOption),
+        );
+
+        expect(firstResult).toEqual({ kind: "message", content: "First result." });
+        expect((yield* checkpoint.get(subagentId)).status).toBe("running");
+        expect(yield* Deferred.isDone(capacityAcquired)).toBe(false);
+
+        yield* Queue.offer(childEvents, { kind: "message", content: "Second result." });
+        const secondResult = yield* process.events.pipe(
+          Stream.runHead,
+          Effect.flatMap(Effect.fromOption),
+        );
+
+        expect([...initialEvents, firstResult, secondResult]).toEqual([
+          { kind: "message", content: "Ready." },
+          { kind: "message", content: "Initial result." },
+          { kind: "message", content: "First result." },
+          { kind: "message", content: "Second result." },
+        ]);
+        yield* Deferred.await(capacityAcquired);
+        yield* checkpoint.changes(subagentId).pipe(
+          Stream.filter((record) => record.status === "idle"),
+          Stream.runHead,
+        );
 
         yield* Fiber.interrupt(running);
-
-        yield* Deferred.await(replacementInterrupted);
+        yield* Fiber.join(capacityWaiter);
         expect(yield* process.await).toEqual({ kind: "killed" });
-        expect(yield* process.events.pipe(Stream.runCollect)).toEqual([
-          { kind: "message", content: "Initially ready." },
-          { kind: "message", content: "Completed while steering." },
-        ]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
             SubagentCheckpoint.layer,
-            SubagentCapacity.layer(1),
+            Layer.succeed(SubagentCapacity, capacity),
             Layer.succeed(
               SubagentHarness,
               SubagentHarness.of({
@@ -239,35 +282,31 @@ it.describe("SubagentProcess", () => {
                 start: () =>
                   Effect.succeed({
                     take: Effect.gen(function* () {
-                      const receive = yield* Ref.getAndUpdate(receiveCount, (count) => count + 1);
+                      const receive = yield* Ref.getAndUpdate(receiveCount, (value) => value + 1);
+                      const event = yield* Queue.take(childEvents);
 
                       if (receive === 0) {
-                        return yield* Effect.gen(function* () {
+                        yield* Effect.gen(function* () {
                           yield* Deferred.succeed(initialAckCompleted, undefined);
                           yield* Deferred.await(releaseInitialReturn);
-                          return { kind: "message" as const, content: "Initially ready." };
                         }).pipe(Effect.uninterruptible);
                       }
 
-                      if (receive === 1) {
-                        return yield* Effect.gen(function* () {
-                          yield* Deferred.succeed(persistentAckCompleted, undefined);
-                          yield* Deferred.await(releasePersistentReturn);
-                          return {
-                            kind: "message" as const,
-                            content: "Completed while steering.",
-                          };
-                        }).pipe(Effect.uninterruptible);
+                      if (event.kind === "message" && event.content === "First result.") {
+                        yield* Deferred.succeed(firstResponseCompleted, undefined);
                       }
 
-                      yield* Deferred.succeed(replacementStarted, undefined);
-                      return yield* Effect.never.pipe(
-                        Effect.onInterrupt(() =>
-                          Deferred.succeed(replacementInterrupted, undefined).pipe(Effect.asVoid),
-                        ),
-                      );
+                      return event;
                     }),
-                    send: (content) => Queue.offer(sent, content).pipe(Effect.asVoid),
+                    send: (content) =>
+                      Effect.gen(function* () {
+                        yield* Queue.offer(sent, content);
+
+                        if (content === "Second command.") {
+                          yield* Deferred.succeed(secondSendStarted, undefined);
+                          yield* Deferred.await(releaseSecondSend);
+                        }
+                      }),
                     await: Effect.never,
                   }),
               }),
@@ -276,7 +315,7 @@ it.describe("SubagentProcess", () => {
         ),
         Effect.ensuring(
           Deferred.succeed(releaseInitialReturn, undefined).pipe(
-            Effect.andThen(Deferred.succeed(releasePersistentReturn, undefined)),
+            Effect.andThen(Deferred.succeed(releaseSecondSend, undefined)),
             Effect.asVoid,
           ),
         ),

@@ -62,10 +62,10 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
 
         yield* project({ status: "running" });
 
-        const eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
-        let event: SubagentEvent | undefined;
+        let eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
+        let pending = 1;
 
-        while (event === undefined) {
+        while (pending > 0) {
           const wake = yield* Effect.raceFirst(
             Fiber.join(eventFiber).pipe(
               Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
@@ -74,13 +74,18 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
           );
 
           if (wake.kind === "event") {
-            event = wake.event;
+            yield* accept(wake.event);
+            pending -= 1;
+
+            if (pending > 0) {
+              eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
+            }
           } else {
             yield* started.send(wake.content);
+            pending += 1;
           }
         }
 
-        yield* accept(event);
         return started;
       }),
     );
@@ -112,10 +117,9 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
           Effect.gen(function* () {
             yield* project({ status: "running" });
             yield* session.send(wake.content);
+            let pending = 1;
 
-            let event: SubagentEvent | undefined;
-
-            while (event === undefined) {
+            while (pending > 0) {
               const turnWake = yield* Effect.raceFirst(
                 Fiber.join(eventFiber).pipe(
                   Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
@@ -126,13 +130,20 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
               );
 
               if (turnWake.kind === "event") {
-                event = turnWake.event;
+                yield* accept(turnWake.event);
+                pending -= 1;
+
+                if (pending > 0) {
+                  eventFiber = yield* session.take.pipe(
+                    Effect.forkScoped({ startImmediately: true }),
+                  );
+                }
               } else {
                 yield* session.send(turnWake.content);
+                pending += 1;
               }
             }
 
-            yield* accept(event);
             eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
           }),
         );
@@ -170,7 +181,10 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
     subagentId,
     events: Stream.fromQueue(events),
     await: Deferred.await(result),
-    send: (content: string) => Queue.offer(outbox, content),
+    send:
+      spec.mode === "ephemeral"
+        ? () => Effect.succeed(false)
+        : (content: string) => Queue.offer(outbox, content),
     run,
   } satisfies SubagentProcess;
 });

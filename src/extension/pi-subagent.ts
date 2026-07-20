@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
 
 import { ChildSession } from "../harness/pi/ChildSession.ts";
 import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
@@ -22,38 +22,61 @@ export default function extension(pi: ExtensionAPI): void {
       Layer.provide(NodeFileSystem.layer),
     ),
   );
+  const commands = Effect.runSync(Queue.unbounded<string>());
+  const ready = Effect.runSync(Queue.unbounded<void>());
 
   let shuttingDown = false;
 
   pi.on("session_start", (_event, ctx) => {
     const starting = runtime.runPromise(ChildSession.use((session) => session.start));
 
-    // Root messages become follow-up prompts in the child Pi session; other
-    // root datagrams have no defined child-side meaning yet and are dropped.
+    // Root messages wait for the preceding Pi run to settle and report before
+    // they start a new run; other root datagrams have no child-side meaning.
     void starting
       .then(() =>
         runtime.runPromise(
-          ChildSession.use((session) =>
-            session.inbox.pipe(
-              Stream.runForEach((datagram) =>
-                datagram.kind === "message"
-                  ? Effect.sync(() => {
-                      pi.sendMessage(
-                        {
-                          customType: "smith-root-message",
-                          content: datagram.content,
-                          display: true,
-                        },
-                        { deliverAs: "followUp", triggerTurn: true },
-                      );
-                    })
-                  : Effect.logDebug("Dropped root failure datagram"),
+          Effect.raceFirst(
+            ChildSession.use((session) =>
+              session.inbox.pipe(
+                Stream.runForEach((datagram) =>
+                  datagram.kind === "message"
+                    ? Queue.offer(commands, datagram.content).pipe(Effect.asVoid)
+                    : Effect.logDebug("Dropped root failure datagram"),
+                ),
               ),
+            ),
+            Effect.forever(
+              Effect.gen(function* () {
+                yield* Queue.take(ready);
+                const content = yield* Queue.take(commands);
+
+                yield* Effect.sync(() => {
+                  pi.sendMessage(
+                    {
+                      customType: "smith-root-message",
+                      content,
+                      display: true,
+                    },
+                    { triggerTurn: true },
+                  );
+                });
+              }),
             ),
           ),
         ),
       )
-      .catch(() => undefined);
+      .then(
+        () => {
+          if (!shuttingDown) {
+            ctx.shutdown();
+          }
+        },
+        () => {
+          if (!shuttingDown) {
+            ctx.shutdown();
+          }
+        },
+      );
 
     // The link connection ending means the root released this subagent.
     void starting
@@ -73,7 +96,12 @@ export default function extension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", (_event, ctx) =>
-    runtime.runPromise(ChildSession.use((session) => session.sendSettled(ctx.sessionManager))),
+    runtime.runPromise(
+      ChildSession.use((session) => session.sendSettled(ctx.sessionManager)).pipe(
+        Effect.andThen(Queue.offer(ready, undefined)),
+        Effect.asVoid,
+      ),
+    ),
   );
 
   pi.on("session_shutdown", () => {
