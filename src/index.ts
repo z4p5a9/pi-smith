@@ -13,9 +13,8 @@ import {
 import { Type } from "typebox";
 
 import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
-import { SubagentBridge } from "./host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "./host/bridge/unix/UnixSocketBridgeTransport.ts";
 import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
+import * as UnixSocketTransport from "./host/link/unix/UnixSocketTransport.ts";
 import { SubagentCapacity } from "./subagent/SubagentCapacity.ts";
 import { SubagentCheckpoint, SubagentRecord } from "./subagent/SubagentCheckpoint.ts";
 import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
@@ -55,8 +54,7 @@ export default function extension(pi: ExtensionAPI): void {
       Layer.provide(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
       Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
-      Layer.provide(SubagentBridge.layer),
-      Layer.provide(UnixSocketBridgeTransport.layer),
+      Layer.provide(UnixSocketTransport.layer),
       Layer.provide(NodeChildProcessSpawner.layer),
       Layer.provide(NodeFileSystem.layer),
       Layer.provide(NodePath.layer),

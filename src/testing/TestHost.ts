@@ -1,18 +1,18 @@
 import { Context, Effect, Layer, Queue, Ref } from "effect";
 
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
+import { SubagentLinkTransport } from "../host/link/Transport.ts";
+import * as Protocol from "../host/Protocol.ts";
 import {
   SubagentHost,
   type SubagentCommand,
   type SubagentHostResponseError,
   type SubagentHostStartError,
-  type SubagentHostSession,
   type SubagentHostUnavailableError,
 } from "../host/Host.ts";
 import type { SubagentId } from "../subagent/SubagentId.ts";
 
 const make = Effect.gen(function* () {
-  const bridge = yield* SubagentBridge;
+  const transport = yield* SubagentLinkTransport;
   const startCalls = yield* Queue.unbounded<{
     readonly subagentId: SubagentId;
     readonly command: SubagentCommand;
@@ -58,7 +58,10 @@ const make = Effect.gen(function* () {
       return yield* configured;
     }
 
-    const listener = yield* bridge.listen(subagentId).pipe(Effect.orDie);
+    const listener = yield* Protocol.listen(subagentId).pipe(
+      Effect.provideService(SubagentLinkTransport, transport),
+      Effect.orDie,
+    );
 
     yield* Effect.acquireRelease(
       Ref.update(state, (prev) => {
@@ -80,13 +83,7 @@ const make = Effect.gen(function* () {
 
     yield* Queue.offer(starts, subagentId);
 
-    const session = yield* listener.accept;
-
-    return {
-      take: session.take,
-      send: session.send,
-      await: session.await,
-    } satisfies SubagentHostSession;
+    return yield* listener.accept;
   });
 
   const stub = Effect.fn("TestHost.stub")(function* (

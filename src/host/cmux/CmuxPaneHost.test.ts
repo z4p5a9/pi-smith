@@ -6,8 +6,8 @@ import { TestClock } from "effect/testing";
 import { TestChildProcessSpawner } from "../../testing/TestChildProcessSpawner.ts";
 import { decodeSubagentId } from "../../subagent/SubagentId.ts";
 import * as CmuxPaneHost from "./CmuxPaneHost.ts";
-import { SubagentBridge } from "../bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../bridge/unix/UnixSocketBridgeTransport.ts";
+import * as Protocol from "../Protocol.ts";
+import * as UnixSocketTransport from "../link/unix/UnixSocketTransport.ts";
 import {
   SubagentHost,
   SubagentHostResponseError,
@@ -24,7 +24,6 @@ it.describe("CmuxPaneHost", () => {
     const childSurfaceId = "44444444-4444-4444-8444-444444444444";
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const childProcesses = yield* TestChildProcessSpawner;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_cmux-create");
@@ -56,12 +55,16 @@ it.describe("CmuxPaneHost", () => {
         ),
       ).pipe(Effect.eventually);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
       const session = yield* Fiber.join(starting);
 
-      yield* child.sendEvent({ kind: "message", content: "Task complete." });
+      const sending = yield* child
+        .send({ kind: "message", content: "Task complete." })
+        .pipe(Effect.forkChild({ startImmediately: true }));
 
       const event = yield* session.take;
+
+      yield* Fiber.join(sending);
 
       expect(event).toEqual({ kind: "message", content: "Task complete." });
 
@@ -103,8 +106,7 @@ it.describe("CmuxPaneHost", () => {
       Effect.provide(
         CmuxPaneHost.layer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -141,8 +143,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -178,8 +179,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -207,8 +207,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -247,7 +246,7 @@ it.describe("CmuxPaneHost", () => {
 
       expect(Schema.is(SubagentHostStartError)(error)).toBe(true);
       expect(error).toMatchObject({
-        reason: "Subagent did not establish a bridge connection within 30 seconds",
+        reason: "Subagent did not establish a link connection within 30 seconds",
       });
       yield* childProcesses.verify;
     }).pipe(
@@ -257,8 +256,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -270,7 +268,6 @@ it.describe("CmuxPaneHost", () => {
     const childSurfaceId = "44444444-4444-4444-8444-444444444444";
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const childProcesses = yield* TestChildProcessSpawner;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_cmux-cleanup");
@@ -297,7 +294,7 @@ it.describe("CmuxPaneHost", () => {
         ),
       ).pipe(Effect.eventually);
 
-      yield* bridge.connect(subagentId);
+      yield* Protocol.connect(subagentId);
       yield* Fiber.join(starting);
       yield* Scope.close(hostScope, Exit.void);
 
@@ -310,8 +307,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -323,7 +319,6 @@ it.describe("CmuxPaneHost", () => {
     const childSurfaceId = "44444444-4444-4444-8444-444444444444";
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const childProcesses = yield* TestChildProcessSpawner;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_cmux-close-timeout");
@@ -348,7 +343,7 @@ it.describe("CmuxPaneHost", () => {
         ),
       ).pipe(Effect.eventually);
 
-      yield* bridge.connect(subagentId);
+      yield* Protocol.connect(subagentId);
       yield* Fiber.join(starting);
 
       const closing = yield* Scope.close(hostScope, Exit.void).pipe(
@@ -366,8 +361,7 @@ it.describe("CmuxPaneHost", () => {
           surfaceId: "22222222-2222-4222-8222-222222222222",
         }).pipe(
           Layer.provideMerge(TestChildProcessSpawner.layer),
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

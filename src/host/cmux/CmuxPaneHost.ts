@@ -3,14 +3,14 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { isPositiveFiniteDuration } from "../../lib/schema.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
-import { SubagentBridge } from "../bridge/Bridge.ts";
+import { SubagentLinkTransport } from "../link/Transport.ts";
+import * as Protocol from "../Protocol.ts";
 import {
   SubagentHost,
   SubagentHostResponseError,
   SubagentHostStartError,
   SubagentHostUnavailableError,
   type SubagentCommand,
-  type SubagentHostSession,
 } from "../Host.ts";
 
 const encodeCmuxRpcParams = Schema.encodeEffect(Schema.UnknownFromJsonString);
@@ -30,7 +30,7 @@ const config = Config.schema(
 
 const make = (root: { readonly workspaceId: string; readonly surfaceId: string }) =>
   Effect.gen(function* () {
-    const bridge = yield* SubagentBridge;
+    const transport = yield* SubagentLinkTransport;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const closeTimeout = yield* config;
 
@@ -129,7 +129,8 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       function* (subagentId: SubagentId, command: SubagentCommand) {
         yield* Effect.annotateCurrentSpan({ subagentId, host: "cmux-pane" });
 
-        const listener = yield* bridge.listen(subagentId).pipe(
+        const listener = yield* Protocol.listen(subagentId).pipe(
+          Effect.provideService(SubagentLinkTransport, transport),
           Effect.mapError((error) =>
             SubagentHostStartError.make({
               subagentId,
@@ -152,13 +153,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
             ),
         );
 
-        const session = yield* listener.accept;
-
-        return {
-          take: session.take,
-          send: session.send,
-          await: session.await,
-        } satisfies SubagentHostSession;
+        return yield* listener.accept;
       },
       (effect, subagentId) =>
         effect.pipe(
@@ -168,7 +163,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
               SubagentHostStartError.make({
                 subagentId,
                 host: "cmux-pane",
-                reason: "Subagent did not establish a bridge connection within 30 seconds",
+                reason: "Subagent did not establish a link connection within 30 seconds",
               }),
           }),
         ),

@@ -3,8 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Stream } from "effect";
 
 import { ChildSession } from "../harness/pi/ChildSession.ts";
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
+import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
 
 export default function extension(pi: ExtensionAPI): void {
@@ -19,8 +18,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   const runtime = ManagedRuntime.make(
     ChildSession.layer(subagentId).pipe(
-      Layer.provide(SubagentBridge.layer),
-      Layer.provide(UnixSocketBridgeTransport.layer),
+      Layer.provide(UnixSocketTransport.layer),
       Layer.provide(NodeFileSystem.layer),
     ),
   );
@@ -30,19 +28,26 @@ export default function extension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     const starting = runtime.runPromise(ChildSession.use((session) => session.start));
 
-    // Root messages become follow-up prompts in the child Pi session.
+    // Root messages become follow-up prompts in the child Pi session; other
+    // root datagrams have no defined child-side meaning yet and are dropped.
     void starting
       .then(() =>
         runtime.runPromise(
           ChildSession.use((session) =>
-            session.messages.pipe(
-              Stream.runForEach((content) =>
-                Effect.sync(() => {
-                  pi.sendMessage(
-                    { customType: "smith-root-message", content, display: true },
-                    { deliverAs: "followUp", triggerTurn: true },
-                  );
-                }),
+            session.inbox.pipe(
+              Stream.runForEach((datagram) =>
+                datagram.kind === "message"
+                  ? Effect.sync(() => {
+                      pi.sendMessage(
+                        {
+                          customType: "smith-root-message",
+                          content: datagram.content,
+                          display: true,
+                        },
+                        { deliverAs: "followUp", triggerTurn: true },
+                      );
+                    })
+                  : Effect.logDebug("Dropped root failure datagram"),
               ),
             ),
           ),
@@ -50,7 +55,7 @@ export default function extension(pi: ExtensionAPI): void {
       )
       .catch(() => undefined);
 
-    // The bridge connection ending means the root released this subagent.
+    // The link connection ending means the root released this subagent.
     void starting
       .then(() =>
         runtime.runPromise(ChildSession.use((session) => session.await.pipe(Effect.ignore))),

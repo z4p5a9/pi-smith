@@ -3,8 +3,8 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 
 import { TestHost } from "../testing/TestHost.ts";
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
+import * as Protocol from "../host/Protocol.ts";
+import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { SubagentHarness } from "../harness/Harness.ts";
 import { SubagentHostStartError } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
@@ -15,7 +15,6 @@ import { makeSubagentProcess } from "./SubagentProcess.ts";
 it.describe("SubagentProcess", () => {
   it.effect("accepts the first message, emits it, and resolves exited", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-message");
@@ -40,9 +39,9 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Task complete." });
+      yield* child.send({ kind: "message", content: "Task complete." });
 
       expect(yield* process.await).toEqual({ kind: "exited" });
       expect(yield* process.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual(
@@ -61,7 +60,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -72,7 +70,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -81,7 +79,6 @@ it.describe("SubagentProcess", () => {
 
   it.effect("runs persistent turns and idles between them", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-persistent");
@@ -106,9 +103,9 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Ready." });
+      yield* child.send({ kind: "message", content: "Ready." });
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "idle"),
         Stream.runHead,
@@ -116,11 +113,12 @@ it.describe("SubagentProcess", () => {
 
       yield* process.send("Review the diff.");
 
-      expect(yield* child.messages.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toBe(
-        "Review the diff.",
-      );
+      expect(yield* child.inbox.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual({
+        kind: "message",
+        content: "Review the diff.",
+      });
 
-      yield* child.sendEvent({ kind: "message", content: "Reviewed." });
+      yield* child.send({ kind: "message", content: "Reviewed." });
 
       const accepted = yield* process.events.pipe(Stream.take(2), Stream.runCollect);
 
@@ -142,7 +140,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -153,7 +150,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -162,7 +159,6 @@ it.describe("SubagentProcess", () => {
 
   it.effect("fails when the child disconnects while idle", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-idle-drop");
@@ -189,9 +185,9 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      const child = yield* Protocol.connect(subagentId).pipe(Scope.provide(childScope));
 
-      yield* child.sendEvent({ kind: "message", content: "Ready." });
+      yield* child.send({ kind: "message", content: "Ready." });
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "idle"),
         Stream.runHead,
@@ -200,7 +196,7 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* process.await).toEqual({
         kind: "failed",
-        reason: "Bridge connection closed",
+        reason: "Link disconnected",
       });
       expect((yield* checkpoint.get(subagentId)).status).toBe("failed");
 
@@ -210,7 +206,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -221,7 +216,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -264,7 +259,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -275,7 +269,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -329,7 +323,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -340,7 +333,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -349,7 +342,6 @@ it.describe("SubagentProcess", () => {
 
   it.effect("resolves failed when the child disconnects before reporting", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_process-disconnect");
@@ -376,7 +368,7 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      yield* Protocol.connect(subagentId).pipe(Scope.provide(childScope));
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "running"),
         Stream.runHead,
@@ -385,12 +377,12 @@ it.describe("SubagentProcess", () => {
 
       expect(yield* process.await).toEqual({
         kind: "failed",
-        reason: "Bridge connection closed",
+        reason: "Link disconnected",
       });
       expect(yield* process.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual(
         {
           kind: "failure",
-          reason: "Bridge connection closed",
+          reason: "Link disconnected",
         },
       );
       expect((yield* checkpoint.get(subagentId)).status).toBe("failed");
@@ -401,7 +393,6 @@ it.describe("SubagentProcess", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(
@@ -412,7 +403,7 @@ it.describe("SubagentProcess", () => {
               }),
             ),
           ),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

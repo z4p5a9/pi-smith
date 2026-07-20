@@ -4,8 +4,9 @@ import { Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Scope, Stream } fro
 import { TestClock } from "effect/testing";
 
 import { TestHost } from "../testing/TestHost.ts";
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
+import { SubagentLinkTransport } from "../host/link/Transport.ts";
+import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
+import * as Protocol from "../host/Protocol.ts";
 import { SubagentHarness } from "../harness/Harness.ts";
 import { SubagentHostUnavailableError } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
@@ -20,7 +21,6 @@ import { decodeSubagentId, type SubagentId } from "./SubagentId.ts";
 it.describe("SubagentCoordinator", () => {
   it.effect("projects and retains one completed message before notification consumption", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
@@ -37,9 +37,9 @@ it.describe("SubagentCoordinator", () => {
       expect(yield* testHost.takeStart).toBe(subagentId);
       expect((yield* checkpoint.get(subagentId)).status).toBe("starting");
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Task complete." });
+      yield* child.send({ kind: "message", content: "Task complete." });
 
       expect(
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
@@ -76,7 +76,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -86,7 +85,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -132,7 +131,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -142,7 +140,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -151,7 +149,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("projects a child-reported failure", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
@@ -167,9 +164,9 @@ it.describe("SubagentCoordinator", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "failure", reason: "Model request failed" });
+      yield* child.send({ kind: "failure", reason: "Model request failed" });
 
       expect(
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
@@ -188,7 +185,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -198,7 +194,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -207,7 +203,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("projects a disconnected running child as failed", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
@@ -224,7 +219,7 @@ it.describe("SubagentCoordinator", () => {
       });
 
       expect(yield* testHost.takeStart).toBe(subagentId);
-      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      yield* Protocol.connect(subagentId).pipe(Scope.provide(childScope));
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "running"),
         Stream.runHead,
@@ -246,7 +241,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -256,7 +250,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -265,7 +259,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("runs at most ten children and preserves FIFO admission", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
@@ -296,9 +289,9 @@ it.describe("SubagentCoordinator", () => {
       expect((yield* checkpoint.get(eleventhSubagentId)).status).toBe("queued");
       expect((yield* checkpoint.get(twelfthSubagentId)).status).toBe("queued");
 
-      const child = yield* bridge.connect(firstStartedSubagentId);
+      const child = yield* Protocol.connect(firstStartedSubagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Done." });
+      yield* child.send({ kind: "message", content: "Done." });
       yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       expect(yield* testHost.takeStart).toBe(eleventhSubagentId);
@@ -310,7 +303,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -320,7 +312,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -329,7 +321,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("publishes one event when delivery races with disconnect", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
       const parentScope = yield* Scope.Scope;
@@ -346,10 +337,10 @@ it.describe("SubagentCoordinator", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      const child = yield* Protocol.connect(subagentId).pipe(Scope.provide(childScope));
 
       yield* child
-        .sendEvent({ kind: "message", content: "Task complete." })
+        .send({ kind: "message", content: "Task complete." })
         .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
       yield* Scope.close(childScope, Exit.void);
 
@@ -375,7 +366,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -385,7 +375,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -394,7 +384,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("routes sends to a persistent subagent and aggregates its turns", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
@@ -410,9 +399,9 @@ it.describe("SubagentCoordinator", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Ready." });
+      yield* child.send({ kind: "message", content: "Ready." });
 
       expect(
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
@@ -423,11 +412,12 @@ it.describe("SubagentCoordinator", () => {
 
       yield* coordinator.send(subagentId, "Review the diff.");
 
-      expect(yield* child.messages.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toBe(
-        "Review the diff.",
-      );
+      expect(yield* child.inbox.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual({
+        kind: "message",
+        content: "Review the diff.",
+      });
 
-      yield* child.sendEvent({ kind: "message", content: "Reviewed." });
+      yield* child.send({ kind: "message", content: "Reviewed." });
 
       expect(
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
@@ -452,7 +442,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -462,7 +451,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -482,7 +471,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -492,7 +480,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -501,7 +489,6 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("fails sending to a finished subagent", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const coordinator = yield* SubagentCoordinator;
       const testHost = yield* TestHost;
 
@@ -516,9 +503,9 @@ it.describe("SubagentCoordinator", () => {
 
       expect(yield* testHost.takeStart).toBe(subagentId);
 
-      const child = yield* bridge.connect(subagentId);
+      const child = yield* Protocol.connect(subagentId);
 
-      yield* child.sendEvent({ kind: "message", content: "Task complete." });
+      yield* child.send({ kind: "message", content: "Task complete." });
       yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       const error = yield* Effect.suspend(() =>
@@ -533,7 +520,6 @@ it.describe("SubagentCoordinator", () => {
         SubagentCoordinator.layer.pipe(
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provide(
             Layer.succeed(
               SubagentHarness,
@@ -543,7 +529,7 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -588,9 +574,8 @@ it.describe("SubagentCoordinator", () => {
             }),
           ),
         ).pipe(
-          Layer.provideMerge(SubagentBridge.layer),
           Layer.provideMerge(SubagentCapacity.layer(10)),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -602,7 +587,6 @@ it.describe("SubagentCoordinator", () => {
       SubagentCoordinator.layer.pipe(
         Layer.provideMerge(SubagentCheckpoint.layer),
         Layer.provideMerge(TestHost.layer),
-        Layer.provideMerge(SubagentBridge.layer),
         Layer.provide(
           Layer.succeed(
             SubagentHarness,
@@ -612,7 +596,7 @@ it.describe("SubagentCoordinator", () => {
           ),
         ),
         Layer.provide(SubagentCapacity.layer(10)),
-        Layer.provide(UnixSocketBridgeTransport.layer),
+        Layer.provideMerge(UnixSocketTransport.layer),
         Layer.provide(NodeFileSystem.layer),
       ),
     );
@@ -624,10 +608,10 @@ it.describe("SubagentCoordinator", () => {
 
       const parentScope = yield* Scope.Scope;
       const childScope = yield* Scope.fork(parentScope);
-      const { bridge, checkpoint, subagentId, testHost } = yield* Effect.promise(() =>
+      const { checkpoint, subagentId, testHost, transport } = yield* Effect.promise(() =>
         runtime.runPromise(
           Effect.gen(function* () {
-            const runtimeBridge = yield* SubagentBridge;
+            const runtimeTransport = yield* SubagentLinkTransport;
             const runtimeCheckpoint = yield* SubagentCheckpoint;
             const coordinator = yield* SubagentCoordinator;
             const runtimeTestHost = yield* TestHost;
@@ -643,16 +627,19 @@ it.describe("SubagentCoordinator", () => {
 
             expect(yield* runtimeTestHost.takeStart).toBe(admittedSubagentId);
             return {
-              bridge: runtimeBridge,
               checkpoint: runtimeCheckpoint,
               subagentId: admittedSubagentId,
               testHost: runtimeTestHost,
+              transport: runtimeTransport,
             };
           }),
         ),
       );
 
-      yield* bridge.connect(subagentId).pipe(Scope.provide(childScope));
+      yield* Protocol.connect(subagentId).pipe(
+        Effect.provideService(SubagentLinkTransport, transport),
+        Scope.provide(childScope),
+      );
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "running"),
         Stream.runHead,

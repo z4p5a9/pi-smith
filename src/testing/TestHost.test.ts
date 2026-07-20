@@ -2,8 +2,8 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
+import * as Protocol from "../host/Protocol.ts";
+import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { SubagentHost, SubagentHostUnavailableError } from "../host/Host.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 import { TestHost } from "./TestHost.ts";
@@ -11,7 +11,6 @@ import { TestHost } from "./TestHost.ts";
 it.describe("TestHost", () => {
   it.effect("stubs and records a scoped host start", () =>
     Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const testHost = yield* TestHost;
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_host-start");
@@ -32,7 +31,7 @@ it.describe("TestHost", () => {
       expect(yield* testHost.takeStart).toBe(subagentId);
       expect(yield* testHost.active).toEqual([subagentId]);
 
-      yield* bridge.connect(subagentId);
+      yield* Protocol.connect(subagentId);
       yield* Fiber.join(starting);
       yield* Scope.close(hostScope, Exit.void);
 
@@ -53,8 +52,7 @@ it.describe("TestHost", () => {
       Effect.scoped,
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),
@@ -85,8 +83,7 @@ it.describe("TestHost", () => {
     }).pipe(
       Effect.provide(
         TestHost.layer.pipe(
-          Layer.provideMerge(SubagentBridge.layer),
-          Layer.provide(UnixSocketBridgeTransport.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
       ),

@@ -1,27 +1,34 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { Context, Effect, Layer, Scope, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Scope, Stream } from "effect";
 
-import { SubagentBridge, type SubagentBridgeChildSession } from "../../host/bridge/Bridge.ts";
+import { SubagentLinkTransport } from "../../host/link/Transport.ts";
+import * as Protocol from "../../host/Protocol.ts";
 import type { SubagentId } from "../../subagent/SubagentId.ts";
 
 const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId) {
   const scope = yield* Scope.Scope;
-  const bridge = yield* SubagentBridge;
-  let session: SubagentBridgeChildSession | undefined;
+  const transport = yield* SubagentLinkTransport;
+  const session = yield* Ref.make(Option.none<Protocol.SubagentChildSession>());
 
   const start = Effect.gen(function* () {
-    if (session !== undefined) {
+    if (Option.isSome(yield* Ref.get(session))) {
       return yield* Effect.void;
     }
 
-    session = yield* bridge.connect(subagentId).pipe(Scope.provide(scope));
-    return yield* Effect.void;
+    const connected = yield* Protocol.connect(subagentId).pipe(
+      Effect.provideService(SubagentLinkTransport, transport),
+      Scope.provide(scope),
+    );
+
+    return yield* Ref.set(session, Option.some(connected));
   }).pipe(Effect.withSpan("PiChildSession.start"));
 
   const sendSettled = Effect.fn("PiChildSession.sendSettled")(function* (
     sessionManager: ExtensionContext["sessionManager"],
   ) {
-    if (session === undefined) {
+    const current = yield* Ref.get(session);
+
+    if (Option.isNone(current)) {
       return yield* Effect.die("Pi child session has not started");
     }
 
@@ -38,14 +45,14 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
     }
 
     if (entry === undefined || entry.type !== "message" || entry.message.role !== "assistant") {
-      return yield* session.sendEvent({
+      return yield* current.value.send({
         kind: "failure",
         reason: "Pi settled without an assistant response",
       });
     }
 
     if (entry.message.stopReason === "error" || entry.message.stopReason === "aborted") {
-      return yield* session.sendEvent({
+      return yield* current.value.send({
         kind: "failure",
         reason: entry.message.errorMessage ?? `Request ${entry.message.stopReason}`,
       });
@@ -59,16 +66,20 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
       }
     }
 
-    return yield* session.sendEvent({ kind: "message", content: content.join("\n") });
+    return yield* current.value.send({ kind: "message", content: content.join("\n") });
   });
 
   return {
     start,
     sendSettled,
-    messages: Stream.unwrap(
-      Effect.sync(() => (session === undefined ? Stream.empty : session.messages)),
+    inbox: Stream.unwrap(
+      Ref.get(session).pipe(
+        Effect.map((current) => (Option.isSome(current) ? current.value.inbox : Stream.empty)),
+      ),
     ),
-    await: Effect.suspend(() => (session === undefined ? Effect.void : session.await)),
+    await: Ref.get(session).pipe(
+      Effect.flatMap((current) => (Option.isSome(current) ? current.value.await : Effect.void)),
+    ),
   };
 });
 

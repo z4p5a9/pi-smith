@@ -5,8 +5,8 @@ import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-co
 import { expect, it, vi } from "@effect/vitest";
 import { Effect, Exit, Fiber, Layer, Scope } from "effect";
 
-import { SubagentBridge } from "../host/bridge/Bridge.ts";
-import * as UnixSocketBridgeTransport from "../host/bridge/unix/UnixSocketBridgeTransport.ts";
+import * as Protocol from "../host/Protocol.ts";
+import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
 
 it.describe("Pi subagent extension", () => {
@@ -14,9 +14,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -62,7 +61,7 @@ it.describe("Pi subagent extension", () => {
       let shutdownRequested = false;
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
 
-      yield* Effect.promise(() =>
+      const settling = yield* Effect.promise(() =>
         settle(
           { type: "agent_settled" },
           {
@@ -72,9 +71,11 @@ it.describe("Pi subagent extension", () => {
             },
           },
         ),
-      );
+      ).pipe(Effect.forkChild({ startImmediately: true }));
 
       const report = yield* session.take;
+
+      yield* Fiber.join(settling);
 
       expect(report).toEqual({
         kind: "message",
@@ -88,12 +89,7 @@ it.describe("Pi subagent extension", () => {
       yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });
@@ -102,9 +98,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -124,9 +119,13 @@ it.describe("Pi subagent extension", () => {
       const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
 
-      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+      const settling = yield* Effect.promise(() =>
+        settle({ type: "agent_settled" }, { sessionManager }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
 
       const report = yield* session.take;
+
+      yield* Fiber.join(settling);
 
       expect(report).toEqual({
         kind: "failure",
@@ -139,12 +138,7 @@ it.describe("Pi subagent extension", () => {
       yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });
@@ -153,9 +147,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -193,9 +186,13 @@ it.describe("Pi subagent extension", () => {
       });
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
 
-      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+      const settling = yield* Effect.promise(() =>
+        settle({ type: "agent_settled" }, { sessionManager }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
 
       const report = yield* session.take;
+
+      yield* Fiber.join(settling);
 
       expect(report).toEqual({ kind: "failure", reason: "Model request failed" });
 
@@ -205,12 +202,7 @@ it.describe("Pi subagent extension", () => {
       yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });
@@ -219,9 +211,8 @@ it.describe("Pi subagent extension", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
-      const listener = yield* bridge.listen(subagentId);
+      const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -258,9 +249,13 @@ it.describe("Pi subagent extension", () => {
       });
       const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
 
-      yield* Effect.promise(() => settle({ type: "agent_settled" }, { sessionManager }));
+      const settling = yield* Effect.promise(() =>
+        settle({ type: "agent_settled" }, { sessionManager }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
 
       const report = yield* session.take;
+
+      yield* Fiber.join(settling);
 
       expect(report).toEqual({ kind: "failure", reason: "Request aborted" });
 
@@ -270,24 +265,18 @@ it.describe("Pi subagent extension", () => {
       yield* session.await.pipe(Effect.exit);
     }).pipe(
       Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });
 
-  it.effect("requests shutdown when the bridge connection ends", () => {
+  it.effect("requests shutdown when the link connection ends", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
 
     return Effect.gen(function* () {
-      const bridge = yield* SubagentBridge;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const listenerScope = yield* Scope.make();
-      const listener = yield* bridge.listen(subagentId).pipe(Scope.provide(listenerScope));
+      const listener = yield* Protocol.listen(subagentId).pipe(Scope.provide(listenerScope));
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
           [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
@@ -325,12 +314,7 @@ it.describe("Pi subagent extension", () => {
       yield* Effect.promise(() => shutdown());
     }).pipe(
       Effect.scoped,
-      Effect.provide(
-        SubagentBridge.layer.pipe(
-          Layer.provide(UnixSocketBridgeTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
   });
