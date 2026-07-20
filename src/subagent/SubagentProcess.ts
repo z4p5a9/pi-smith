@@ -1,7 +1,7 @@
-import { Cause, Deferred, Effect, Predicate, Queue, Stream } from "effect";
+import { Cause, Deferred, Effect, Fiber, Predicate, Queue, Stream } from "effect";
 
 import { SubagentHarness } from "../harness/Harness.ts";
-import { SubagentHost, type SubagentHostSession } from "../host/Host.ts";
+import { SubagentHost } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint, type SubagentRecord } from "./SubagentCheckpoint.ts";
 import type { SubagentEvent } from "./SubagentEvent.ts";
@@ -25,8 +25,8 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
   const checkpoint = yield* SubagentCheckpoint;
   const harness = yield* SubagentHarness;
   const host = yield* SubagentHost;
-  const accepted = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
-  const mailbox = yield* Queue.unbounded<string, Cause.Done>();
+  const events = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
+  const outbox = yield* Queue.unbounded<string, Cause.Done>();
   const result = yield* Deferred.make<SubagentProcessResult>();
 
   const project = (fields: Partial<Omit<SubagentRecord, "subagentId">>) =>
@@ -49,30 +49,8 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
               latestEvent: event,
             }
           : { latestEvent: event },
-      ).pipe(Effect.andThen(Queue.offer(accepted, event)), Effect.asVoid),
+      ).pipe(Effect.andThen(Queue.offer(events, event)), Effect.asVoid),
     );
-
-  // A turn ends at the next child event; sends arriving mid-turn are steering
-  // and forwarded immediately.
-  const awaitTurnEnd = (session: SubagentHostSession) =>
-    Effect.gen(function* () {
-      let turnEnd: SubagentEvent | undefined;
-
-      while (turnEnd === undefined) {
-        const wake = yield* Effect.raceFirst(
-          session.take.pipe(Effect.map((event) => ({ kind: "event" as const, event }))),
-          Queue.take(mailbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
-        );
-
-        if (wake.kind === "event") {
-          turnEnd = wake.event;
-        } else {
-          yield* session.send(wake.content);
-        }
-      }
-
-      return turnEnd;
-    });
 
   const run = Effect.gen(function* () {
     const command = yield* harness.makeCommand(subagentId, spec);
@@ -84,7 +62,23 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
 
         yield* project({ status: "running" });
 
-        const event = yield* awaitTurnEnd(started);
+        const eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
+        let event: SubagentEvent | undefined;
+
+        while (event === undefined) {
+          const wake = yield* Effect.raceFirst(
+            Fiber.join(eventFiber).pipe(
+              Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
+            ),
+            Queue.take(outbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
+          );
+
+          if (wake.kind === "event") {
+            event = wake.event;
+          } else {
+            yield* started.send(wake.content);
+          }
+        }
 
         yield* accept(event);
         return started;
@@ -96,17 +90,21 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
       return yield* Effect.void;
     }
 
+    let eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+
     return yield* Effect.forever(
       Effect.gen(function* () {
         yield* project({ status: "idle" });
 
         const wake = yield* Effect.raceFirst(
-          Queue.take(mailbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
-          session.take.pipe(Effect.map((event) => ({ kind: "event" as const, event }))),
+          Fiber.join(eventFiber).pipe(Effect.map((event) => ({ kind: "event" as const, event }))),
+          Queue.take(outbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
         );
 
         if (wake.kind === "event") {
-          return yield* accept(wake.event);
+          yield* accept(wake.event);
+          eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+          return yield* Effect.void;
         }
 
         yield* project({ status: "waiting" });
@@ -115,9 +113,27 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
             yield* project({ status: "running" });
             yield* session.send(wake.content);
 
-            const event = yield* awaitTurnEnd(session);
+            let event: SubagentEvent | undefined;
+
+            while (event === undefined) {
+              const turnWake = yield* Effect.raceFirst(
+                Fiber.join(eventFiber).pipe(
+                  Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
+                ),
+                Queue.take(outbox).pipe(
+                  Effect.map((content) => ({ kind: "send" as const, content })),
+                ),
+              );
+
+              if (turnWake.kind === "event") {
+                event = turnWake.event;
+              } else {
+                yield* session.send(turnWake.content);
+              }
+            }
 
             yield* accept(event);
+            eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
           }),
         );
       }),
@@ -137,7 +153,7 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
 
             return Effect.uninterruptible(
               project({ status: "failed", latestEvent: failure }).pipe(
-                Effect.andThen(Queue.offer(accepted, failure)),
+                Effect.andThen(Queue.offer(events, failure)),
                 Effect.andThen(Deferred.succeed(result, { kind: "failed", reason })),
                 Effect.asVoid,
               ),
@@ -146,15 +162,15 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
     ),
     // The result must resolve on every exit path; interruption resolves `killed`.
     Effect.onExit(() => Deferred.succeed(result, { kind: "killed" }).pipe(Effect.asVoid)),
-    Effect.ensuring(Queue.end(accepted).pipe(Effect.andThen(Queue.end(mailbox)))),
+    Effect.ensuring(Queue.end(events).pipe(Effect.andThen(Queue.end(outbox)))),
     Effect.annotateLogs({ subagentId }),
   );
 
   return {
     subagentId,
-    events: Stream.fromQueue(accepted),
+    events: Stream.fromQueue(events),
     await: Deferred.await(result),
-    send: (content: string) => Queue.offer(mailbox, content),
+    send: (content: string) => Queue.offer(outbox, content),
     run,
   } satisfies SubagentProcess;
 });

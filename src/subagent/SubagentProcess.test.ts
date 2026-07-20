@@ -1,12 +1,12 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope, Stream } from "effect";
 
 import { TestHost } from "../testing/TestHost.ts";
 import * as Protocol from "../host/Protocol.ts";
 import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { SubagentHarness } from "../harness/Harness.ts";
-import { SubagentHostStartError } from "../host/Host.ts";
+import { SubagentHost, SubagentHostStartError } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
@@ -120,9 +120,9 @@ it.describe("SubagentProcess", () => {
 
       yield* child.send({ kind: "message", content: "Reviewed." });
 
-      const accepted = yield* process.events.pipe(Stream.take(2), Stream.runCollect);
+      const events = yield* process.events.pipe(Stream.take(2), Stream.runCollect);
 
-      expect(accepted).toEqual([
+      expect(events).toEqual([
         { kind: "message", content: "Ready." },
         { kind: "message", content: "Reviewed." },
       ]);
@@ -155,6 +155,133 @@ it.describe("SubagentProcess", () => {
         ),
       ),
     ),
+  );
+
+  it.effect("retains acknowledged events across initial and persistent outbox wins", () =>
+    Effect.gen(function* () {
+      const receiveCount = yield* Ref.make(0);
+      const initialAckCompleted = yield* Deferred.make<void>();
+      const releaseInitialReturn = yield* Deferred.make<void>();
+      const persistentAckCompleted = yield* Deferred.make<void>();
+      const releasePersistentReturn = yield* Deferred.make<void>();
+      const replacementStarted = yield* Deferred.make<void>();
+      const replacementInterrupted = yield* Deferred.make<void>();
+      const sent = yield* Queue.unbounded<string>();
+
+      return yield* Effect.gen(function* () {
+        const checkpoint = yield* SubagentCheckpoint;
+        const subagentId = yield* decodeSubagentId("sa_12345678_process-retained-receive");
+
+        yield* checkpoint.put({
+          subagentId,
+          status: "queued",
+          title: "Assistant",
+          prompt: "Stand by.",
+          cwd: "/worktree",
+          mode: "persistent",
+        });
+
+        const process = yield* makeSubagentProcess(subagentId, {
+          title: "Assistant",
+          prompt: "Stand by.",
+          cwd: "/worktree",
+          mode: "persistent",
+        });
+        const running = yield* process.run.pipe(Effect.forkChild({ startImmediately: true }));
+
+        yield* Deferred.await(initialAckCompleted);
+
+        yield* process.send("First initial steering message.");
+        expect(yield* Queue.take(sent)).toBe("First initial steering message.");
+        expect(yield* Ref.get(receiveCount)).toBe(1);
+
+        yield* process.send("Second initial steering message.");
+        expect(yield* Queue.take(sent)).toBe("Second initial steering message.");
+        expect(yield* Ref.get(receiveCount)).toBe(1);
+
+        yield* Deferred.succeed(releaseInitialReturn, undefined);
+        yield* Deferred.await(persistentAckCompleted);
+
+        yield* process.send("First persistent steering message.");
+        expect(yield* Queue.take(sent)).toBe("First persistent steering message.");
+        expect(yield* Ref.get(receiveCount)).toBe(2);
+
+        yield* process.send("Second persistent steering message.");
+        expect(yield* Queue.take(sent)).toBe("Second persistent steering message.");
+        expect(yield* Ref.get(receiveCount)).toBe(2);
+
+        yield* Deferred.succeed(releasePersistentReturn, undefined);
+        yield* Deferred.await(replacementStarted);
+        expect(yield* Ref.get(receiveCount)).toBe(3);
+
+        yield* Fiber.interrupt(running);
+
+        yield* Deferred.await(replacementInterrupted);
+        expect(yield* process.await).toEqual({ kind: "killed" });
+        expect(yield* process.events.pipe(Stream.runCollect)).toEqual([
+          { kind: "message", content: "Initially ready." },
+          { kind: "message", content: "Completed while steering." },
+        ]);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            SubagentCheckpoint.layer,
+            SubagentCapacity.layer(1),
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+            Layer.succeed(
+              SubagentHost,
+              SubagentHost.of({
+                start: () =>
+                  Effect.succeed({
+                    take: Effect.gen(function* () {
+                      const receive = yield* Ref.getAndUpdate(receiveCount, (count) => count + 1);
+
+                      if (receive === 0) {
+                        return yield* Effect.gen(function* () {
+                          yield* Deferred.succeed(initialAckCompleted, undefined);
+                          yield* Deferred.await(releaseInitialReturn);
+                          return { kind: "message" as const, content: "Initially ready." };
+                        }).pipe(Effect.uninterruptible);
+                      }
+
+                      if (receive === 1) {
+                        return yield* Effect.gen(function* () {
+                          yield* Deferred.succeed(persistentAckCompleted, undefined);
+                          yield* Deferred.await(releasePersistentReturn);
+                          return {
+                            kind: "message" as const,
+                            content: "Completed while steering.",
+                          };
+                        }).pipe(Effect.uninterruptible);
+                      }
+
+                      yield* Deferred.succeed(replacementStarted, undefined);
+                      return yield* Effect.never.pipe(
+                        Effect.onInterrupt(() =>
+                          Deferred.succeed(replacementInterrupted, undefined).pipe(Effect.asVoid),
+                        ),
+                      );
+                    }),
+                    send: (content) => Queue.offer(sent, content).pipe(Effect.asVoid),
+                    await: Effect.never,
+                  }),
+              }),
+            ),
+          ),
+        ),
+        Effect.ensuring(
+          Deferred.succeed(releaseInitialReturn, undefined).pipe(
+            Effect.andThen(Deferred.succeed(releasePersistentReturn, undefined)),
+            Effect.asVoid,
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.effect("fails when the child disconnects while idle", () =>
