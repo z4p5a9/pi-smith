@@ -1,4 +1,4 @@
-import { Context, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
@@ -26,6 +26,7 @@ export class SubagentInactiveError extends Schema.TaggedErrorClass<SubagentInact
 interface Admission {
   readonly subagentId: SubagentId;
   readonly spec: SubagentSpec;
+  readonly ready: Deferred.Deferred<void>;
 }
 
 const make = Effect.fn("SubagentCoordinator.make")(function* () {
@@ -40,19 +41,23 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
 
   yield* Effect.forever(
     Effect.gen(function* () {
-      const { spec, subagentId } = yield* Queue.take(admissions);
-      const process = yield* makeSubagentProcess(subagentId, spec);
+      const admission = yield* Queue.take(admissions);
+      const process = yield* makeSubagentProcess(admission.subagentId, admission.spec);
       const aggregate = process.events.pipe(
-        Stream.runForEach((event) => Queue.offer(events, { subagentId, event })),
+        Stream.runForEach((event) =>
+          Queue.offer(events, { subagentId: admission.subagentId, event }),
+        ),
       );
 
-      registry.set(subagentId, process);
+      registry.set(admission.subagentId, process);
       yield* FiberMap.run(
         children,
-        subagentId,
+        admission.subagentId,
         Effect.all([process.run, aggregate], { concurrency: "unbounded", discard: true }),
         { startImmediately: true },
       );
+
+      yield* Deferred.succeed(admission.ready, undefined);
     }),
   ).pipe(Effect.forkScoped({ startImmediately: true }));
 
@@ -65,9 +70,11 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
 
   const create = Effect.fn("SubagentCoordinator.create")(function* (spec: SubagentSpec) {
     const subagentId = yield* generateSubagentId(spec.title);
+    const ready = yield* Deferred.make<void>();
 
     yield* checkpoint.put({ subagentId, status: "queued", ...spec });
-    yield* Queue.offer(admissions, { subagentId, spec });
+    yield* Queue.offer(admissions, { subagentId, spec, ready });
+    yield* Deferred.await(ready);
 
     return subagentId;
   });

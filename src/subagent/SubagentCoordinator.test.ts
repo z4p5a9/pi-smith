@@ -330,6 +330,127 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
+  it.effect("admits a persistent subagent before host capacity is available", () =>
+    Effect.gen(function* () {
+      const coordinator = yield* SubagentCoordinator;
+      const capacity = yield* SubagentCapacity;
+      const testHost = yield* TestHost;
+      const capacityAcquired = yield* Deferred.make<void>();
+      const releaseCapacity = yield* Deferred.make<void>();
+      const capacityHolder = yield* capacity
+        .withPermit(
+          Deferred.succeed(capacityAcquired, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCapacity)),
+          ),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Deferred.await(capacityAcquired);
+
+      const subagentId = yield* coordinator.create({
+        title: "Queued assistant",
+        prompt: "Stand by.",
+        cwd: "/worktree",
+        mode: "persistent",
+      });
+      const messageId = yield* coordinator.send(subagentId, "Review the diff.");
+
+      expect(messageId).toMatch(/^msg_[a-z0-9]{24}$/);
+      expect(yield* testHost.calls).toEqual([]);
+
+      yield* coordinator.kill(subagentId);
+      yield* Deferred.succeed(releaseCapacity, undefined);
+      yield* Fiber.join(capacityHolder);
+      expect(yield* testHost.calls).toEqual([]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provideMerge(SubagentCapacity.layer(1)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("does not start a subagent killed before host capacity is available", () =>
+    Effect.gen(function* () {
+      const coordinator = yield* SubagentCoordinator;
+      const capacity = yield* SubagentCapacity;
+      const testHost = yield* TestHost;
+      const capacityAcquired = yield* Deferred.make<void>();
+      const releaseCapacity = yield* Deferred.make<void>();
+      const capacityHolder = yield* capacity
+        .withPermit(
+          Deferred.succeed(capacityAcquired, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCapacity)),
+          ),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Deferred.await(capacityAcquired);
+
+      const killedSubagentId = yield* coordinator.create({
+        title: "Cancelled assistant",
+        prompt: "Stand by.",
+        cwd: "/worktree",
+        mode: "persistent",
+      });
+
+      yield* coordinator.kill(killedSubagentId);
+      yield* testHost.stub([null]);
+
+      const sentinelSubagentId = yield* coordinator.create({
+        title: "Sentinel",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
+      });
+
+      yield* Deferred.succeed(releaseCapacity, undefined);
+      yield* Fiber.join(capacityHolder);
+
+      expect(yield* testHost.takeStart).toBe(sentinelSubagentId);
+      expect(yield* testHost.calls).toEqual([
+        {
+          subagentId: sentinelSubagentId,
+          command: { executable: "pi", args: [] },
+        },
+      ]);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provideMerge(SubagentCapacity.layer(1)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("publishes one event when delivery races with disconnect", () =>
     Effect.gen(function* () {
       const coordinator = yield* SubagentCoordinator;
