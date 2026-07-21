@@ -3,11 +3,10 @@ import {
   Deferred,
   Effect,
   Exit,
-  HashMap,
-  Option,
   Queue,
   Ref,
   Schema,
+  Semaphore,
   type Scope,
   Stream,
 } from "effect";
@@ -71,15 +70,24 @@ export const make = Effect.fn("Link.make")(function* (
 ): Effect.fn.Return<Link, never, Scope.Scope> {
   const encoder = new TextEncoder();
   const write = yield* socket.writer;
-  const inbound = yield* Queue.unbounded<
+  const inbound = yield* Queue.dropping<
     { readonly data: Datagram; readonly ack: Effect.Effect<void> },
     Cause.Done
-  >();
-  const pending = yield* Ref.make(
-    HashMap.empty<number, Deferred.Deferred<void, LinkDisconnectedError>>(),
-  );
+  >(1);
+  const sendWindow = yield* Semaphore.make(1);
+  const inboundDeliveryLease = yield* Ref.make<
+    | { readonly state: "available" }
+    | { readonly state: "held"; readonly seq: number; readonly identity: object }
+    | { readonly state: "acknowledging"; readonly seq: number; readonly identity: object }
+  >({ state: "available" });
+  const outbound = yield* Ref.make<{
+    readonly nextSequence: number;
+    readonly active?: {
+      readonly seq: number;
+      readonly acked: Deferred.Deferred<void, LinkDisconnectedError>;
+    };
+  }>({ nextSequence: 0 });
   const lifetime = yield* Deferred.make<void, LinkDisconnectedError | LinkProtocolError>();
-  const sequence = yield* Ref.make(0);
   const inboundByteCount = yield* Ref.make(0);
 
   const writeFrame = Effect.fn("Link.writeFrame")(function* (frame: typeof Frame.Type) {
@@ -98,35 +106,81 @@ export const make = Effect.fn("Link.make")(function* (
     }
 
     if ("ack" in frame) {
-      const acked = yield* Ref.modify(
-        pending,
-        (entries) => [HashMap.get(entries, frame.ack), HashMap.remove(entries, frame.ack)] as const,
-      );
+      const active = (yield* Ref.get(outbound)).active;
 
-      if (Option.isNone(acked)) {
+      if (active === undefined || active.seq !== frame.ack) {
         return yield* Effect.logDebug("Dropped unmatched link ack").pipe(
           Effect.annotateLogs({ ack: frame.ack }),
         );
       }
 
-      return yield* Deferred.succeed(acked.value, undefined).pipe(Effect.asVoid);
+      return yield* Deferred.succeed(active.acked, undefined).pipe(Effect.asVoid);
     }
 
-    return yield* Queue.offer(inbound, {
+    const identity = {};
+    const previous = yield* Ref.modify(
+      inboundDeliveryLease,
+      (current) =>
+        [
+          current,
+          current.state === "available"
+            ? { state: "held" as const, seq: frame.seq, identity }
+            : current,
+        ] as const,
+    );
+
+    if (previous.state !== "available") {
+      return yield* LinkProtocolError.make({
+        reason: `Received data frame ${frame.seq} while frame ${previous.seq} remains unacknowledged`,
+      });
+    }
+
+    const ack = Effect.uninterruptible(
+      Effect.gen(function* () {
+        const claimed = yield* Ref.modify(inboundDeliveryLease, (current) =>
+          current.state === "held" && current.identity === identity
+            ? ([true, { state: "acknowledging" as const, seq: frame.seq, identity }] as const)
+            : ([false, current] as const),
+        );
+
+        if (!claimed) {
+          return;
+        }
+
+        const written = yield* Effect.raceFirst(
+          writeFrame({ v: 1, subagentId, ack: frame.seq }).pipe(Effect.as(true as const)),
+          Deferred.await(lifetime).pipe(Effect.exit, Effect.as(false as const)),
+        ).pipe(
+          Effect.catch((error) => Deferred.fail(lifetime, error).pipe(Effect.as(false as const))),
+        );
+
+        if (written) {
+          yield* Ref.update(inboundDeliveryLease, (current) =>
+            current.state === "acknowledging" && current.identity === identity
+              ? { state: "available" as const }
+              : current,
+          );
+        }
+      }),
+    );
+
+    const offered = yield* Queue.offer(inbound, {
       data: frame.data,
-      // The consumer fulfills the acknowledgement. Writes park in the socket
-      // send queue forever once the connection is gone, so the ack races the
-      // lifetime and degrades to a no-op on a disconnected link.
-      ack: Effect.raceFirst(
-        writeFrame({ v: 1, subagentId, ack: frame.seq }),
-        Deferred.await(lifetime).pipe(Effect.exit, Effect.asVoid),
-      ).pipe(Effect.ignore),
-    }).pipe(Effect.asVoid);
+      ack,
+    });
+
+    if (!offered) {
+      return yield* LinkProtocolError.make({
+        reason: `Inbound data window rejected frame ${frame.seq}`,
+      });
+    }
+
+    return yield* Effect.void;
   });
 
   // The write side goes through `write` directly; the channel is read-only and
   // `Stream.never` keeps its input open so the socket is never half-closed.
-  yield* Stream.never.pipe(
+  const reader = Stream.never.pipe(
     Stream.pipeThroughChannel(Socket.toChannel(socket)),
     Stream.mapEffect((chunk) =>
       Effect.gen(function* () {
@@ -166,18 +220,15 @@ export const make = Effect.fn("Link.make")(function* (
         reason: String(error),
       }),
     ),
+  );
+
+  yield* Effect.raceFirst(reader, Deferred.await(lifetime).pipe(Effect.exit, Effect.asVoid)).pipe(
     Effect.onExit((exit) =>
       Effect.gen(function* () {
         yield* Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
           ? Deferred.failCause(lifetime, exit.cause)
           : Deferred.succeed(lifetime, undefined);
         yield* Queue.end(inbound);
-
-        const remaining = yield* Ref.getAndSet(pending, HashMap.empty());
-
-        for (const acked of HashMap.values(remaining)) {
-          yield* Deferred.fail(acked, LinkDisconnectedError.make({ reason: "Link disconnected" }));
-        }
       }),
     ),
     Effect.ignore,
@@ -196,18 +247,42 @@ export const make = Effect.fn("Link.make")(function* (
   );
 
   const send = Effect.fn("Link.send")(function* (data: Datagram) {
-    const seq = yield* Ref.getAndUpdate(sequence, (next) => next + 1);
-    const acked = yield* Deferred.make<void, LinkDisconnectedError>();
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const permits = yield* restore(Effect.raceFirst(sendDisconnected, sendWindow.take(1)));
+        const acked = yield* Deferred.make<void, LinkDisconnectedError>();
+        const seq = yield* Ref.modify(outbound, (current) => [
+          current.nextSequence,
+          {
+            nextSequence: current.nextSequence + 1,
+            active: { seq: current.nextSequence, acked },
+          },
+        ]);
 
-    yield* Ref.update(pending, HashMap.set(seq, acked));
-
-    return yield* Effect.raceFirst(
-      writeFrame({ v: 1, subagentId, seq, data }),
-      sendDisconnected,
-    ).pipe(
-      Effect.andThen(Deferred.await(acked)),
-      Effect.onInterrupt(() => Ref.update(pending, HashMap.remove(seq))),
-      Effect.onError(() => Ref.update(pending, HashMap.remove(seq))),
+        return yield* restore(
+          Effect.raceFirst(
+            sendDisconnected,
+            writeFrame({ v: 1, subagentId, seq, data }).pipe(
+              Effect.catch((error) =>
+                Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
+              ),
+              Effect.andThen(Deferred.await(acked)),
+            ),
+          ),
+        ).pipe(
+          Effect.onInterrupt(() =>
+            Deferred.fail(
+              lifetime,
+              LinkDisconnectedError.make({ reason: "Link send interrupted" }),
+            ).pipe(Effect.asVoid),
+          ),
+          Effect.ensuring(
+            Ref.update(outbound, (current) => ({
+              nextSequence: current.nextSequence,
+            })).pipe(Effect.andThen(sendWindow.release(permits))),
+          ),
+        );
+      }),
     );
   });
 

@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodeSocket } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 
 import { LinkDisconnectedError, maxLinkFrameBytes } from "./link/Link.ts";
 import * as UnixSocketTransport from "./link/unix/UnixSocketTransport.ts";
@@ -163,6 +163,9 @@ it.describe("SubagentProtocol", () => {
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
       const write = yield* socket.writer;
+      const firstAcknowledged = yield* Deferred.make<void>();
+      const secondAcknowledged = yield* Deferred.make<void>();
+      let output = "";
       const frames = yield* Effect.forEach(
         [
           { v: 1, subagentId, seq: 0, data: { kind: "hello" } },
@@ -173,14 +176,38 @@ it.describe("SubagentProtocol", () => {
       );
 
       yield* socket
-        .run(() => undefined, {
-          onOpen: write(frames.map((frame) => `${frame}\n`).join("")).pipe(Effect.orDie),
-        })
+        .runString(
+          (chunk) => {
+            output += chunk;
+
+            return Effect.gen(function* () {
+              if (output.includes('"ack":0')) {
+                yield* Deferred.succeed(firstAcknowledged, undefined);
+              }
+
+              if (output.includes('"ack":1')) {
+                yield* Deferred.succeed(secondAcknowledged, undefined);
+              }
+            });
+          },
+          {
+            onOpen: write(`${frames[0]}\n`).pipe(Effect.orDie),
+          },
+        )
         .pipe(Effect.forkScoped);
 
       const root = yield* listener.accept;
+      const taking = yield* root.take.pipe(Effect.forkChild({ startImmediately: true }));
 
-      expect(yield* root.take).toEqual({ kind: "message", content: "After the hellos." });
+      yield* Deferred.await(firstAcknowledged);
+      yield* write(`${frames[1]}\n`).pipe(Effect.orDie);
+      yield* Deferred.await(secondAcknowledged);
+      yield* write(`${frames[2]}\n`).pipe(Effect.orDie);
+
+      expect(yield* Fiber.join(taking)).toEqual({
+        kind: "message",
+        content: "After the hellos.",
+      });
     }).pipe(
       Effect.scoped,
       Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
