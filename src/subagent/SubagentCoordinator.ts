@@ -1,9 +1,12 @@
 import { Context, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
-import type { SubagentEventEnvelope } from "./SubagentEvent.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
-import { makeSubagentProcess, type SubagentProcess } from "./SubagentProcess.ts";
+import {
+  makeSubagentProcess,
+  type SubagentProcess,
+  type SubagentProcessEvent,
+} from "./SubagentProcess.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export class SubagentUnknownError extends Schema.TaggedErrorClass<SubagentUnknownError>()(
@@ -28,7 +31,10 @@ interface Admission {
 const make = Effect.fn("SubagentCoordinator.make")(function* () {
   const checkpoint = yield* SubagentCheckpoint;
   const admissions = yield* Queue.unbounded<Admission>();
-  const events = yield* Queue.unbounded<SubagentEventEnvelope>();
+  const events = yield* Queue.unbounded<{
+    readonly subagentId: SubagentId;
+    readonly event: SubagentProcessEvent;
+  }>();
   const children = yield* FiberMap.make<SubagentId>();
   const registry = new Map<SubagentId, SubagentProcess>();
 
@@ -76,13 +82,13 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
       return yield* SubagentUnknownError.make({ subagentId });
     }
 
-    const delivered = yield* process.send(content);
+    const messageId = yield* process.send(content);
 
-    if (!delivered) {
+    if (messageId === undefined) {
       return yield* SubagentInactiveError.make({ subagentId });
     }
 
-    return yield* Effect.void;
+    return messageId;
   });
 
   const kill = Effect.fn("SubagentCoordinator.kill")(function* (subagentId: SubagentId) {

@@ -69,6 +69,32 @@ export default function extension(pi: ExtensionAPI): void {
         yield* coordinator.events.pipe(
           Stream.runForEach(({ event, subagentId }) =>
             Effect.try(() => {
+              if (event.kind === "message-rejected") {
+                pi.sendMessage(
+                  {
+                    customType: "smith-subagent",
+                    content:
+                      `Message ${event.messageId} to subagent ${subagentId} was rejected before ` +
+                      `delivery: ${event.actualBytes} bytes exceeds the ${event.maxBytes}-byte limit.`,
+                    display: false,
+                    details: { subagentId, event },
+                  },
+                  {
+                    deliverAs: "followUp",
+                    triggerTurn: true,
+                  },
+                );
+
+                if (ctx.hasUI) {
+                  ctx.ui.notify(
+                    `Message ${event.messageId} to subagent ${subagentId} was rejected`,
+                    "error",
+                  );
+                }
+
+                return;
+              }
+
               pi.sendMessage(
                 {
                   customType: "smith-subagent",
@@ -162,7 +188,7 @@ export default function extension(pi: ExtensionAPI): void {
     name: "subagent_send",
     label: "Send to subagent",
     description:
-      "Send a follow-up message to a subagent. An idle persistent subagent starts a " +
+      "Queue a follow-up message for a subagent. An idle persistent subagent starts a " +
       "new turn; a working subagent receives it as steering. The response arrives " +
       "asynchronously as a follow-up message.",
     parameters: Type.Object(
@@ -185,11 +211,16 @@ export default function extension(pi: ExtensionAPI): void {
           const coordinator = yield* SubagentCoordinator;
           const id = yield* decodeSubagentId(subagentId);
 
-          yield* coordinator.send(id, message);
+          const messageId = yield* coordinator.send(id, message);
 
           return {
-            content: [{ type: "text" as const, text: `Message sent to ${id}.` }],
-            details: { subagentId },
+            content: [
+              {
+                type: "text" as const,
+                text: `Queued message ${messageId} for subagent ${id}.`,
+              },
+            ],
+            details: { subagentId: id, messageId },
           };
         }).pipe(
           Effect.catchTags({

@@ -1,19 +1,35 @@
 import { Cause, Deferred, Effect, Fiber, Predicate, Queue, Stream } from "effect";
 
 import { SubagentHarness } from "../harness/Harness.ts";
-import { SubagentHost } from "../host/Host.ts";
+import { SubagentHost, type SubagentHostSession } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint, type SubagentRecord } from "./SubagentCheckpoint.ts";
 import type { SubagentEvent } from "./SubagentEvent.ts";
 import type { SubagentId } from "./SubagentId.ts";
+import { generateSubagentMessageId, type SubagentMessageId } from "./SubagentMessageId.ts";
 import type { SubagentProcessResult } from "./SubagentProcessResult.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
+export type SubagentProcessEvent =
+  | SubagentEvent
+  | {
+      readonly kind: "message-rejected";
+      readonly messageId: SubagentMessageId;
+      readonly reason: "frame-too-large";
+      readonly actualBytes: number;
+      readonly maxBytes: number;
+    };
+
+interface SubagentMessage {
+  readonly messageId: SubagentMessageId;
+  readonly content: string;
+}
+
 export interface SubagentProcess {
   readonly subagentId: SubagentId;
-  readonly events: Stream.Stream<SubagentEvent>;
+  readonly events: Stream.Stream<SubagentProcessEvent>;
   readonly await: Effect.Effect<SubagentProcessResult>;
-  readonly send: (content: string) => Effect.Effect<boolean>;
+  readonly send: (content: string) => Effect.Effect<SubagentMessageId | undefined>;
   readonly run: Effect.Effect<void>;
 }
 
@@ -25,9 +41,25 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
   const checkpoint = yield* SubagentCheckpoint;
   const harness = yield* SubagentHarness;
   const host = yield* SubagentHost;
-  const events = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
-  const outbox = yield* Queue.unbounded<string, Cause.Done>();
+  const events = yield* Queue.unbounded<SubagentProcessEvent, Cause.Done>();
+  const outbox = yield* Queue.unbounded<SubagentMessage, Cause.Done>();
   const result = yield* Deferred.make<SubagentProcessResult>();
+
+  const sendToSession = (session: SubagentHostSession, message: SubagentMessage) =>
+    session.send(message.content).pipe(
+      Effect.as(true),
+      Effect.catchTag("LinkFrameTooLargeError", (error) =>
+        Effect.uninterruptible(
+          Queue.offer(events, {
+            kind: "message-rejected",
+            messageId: message.messageId,
+            reason: "frame-too-large",
+            actualBytes: error.actualBytes,
+            maxBytes: error.maxBytes,
+          }).pipe(Effect.as(false)),
+        ),
+      ),
+    );
 
   const project = (fields: Partial<Omit<SubagentRecord, "subagentId">>) =>
     checkpoint
@@ -68,9 +100,17 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
         while (pending > 0) {
           const wake = yield* Effect.raceFirst(
             Fiber.join(eventFiber).pipe(
-              Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
+              Effect.map((childEvent) => ({
+                kind: "event" as const,
+                event: childEvent,
+              })),
             ),
-            Queue.take(outbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
+            Queue.take(outbox).pipe(
+              Effect.map((message) => ({
+                kind: "send" as const,
+                message,
+              })),
+            ),
           );
 
           if (wake.kind === "event") {
@@ -81,8 +121,11 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
               eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
             }
           } else {
-            yield* started.send(wake.content);
-            pending += 1;
+            const sent = yield* sendToSession(started, wake.message);
+
+            if (sent) {
+              pending += 1;
+            }
           }
         }
 
@@ -102,8 +145,18 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
         yield* project({ status: "idle" });
 
         const wake = yield* Effect.raceFirst(
-          Fiber.join(eventFiber).pipe(Effect.map((event) => ({ kind: "event" as const, event }))),
-          Queue.take(outbox).pipe(Effect.map((content) => ({ kind: "send" as const, content }))),
+          Fiber.join(eventFiber).pipe(
+            Effect.map((event) => ({
+              kind: "event" as const,
+              event,
+            })),
+          ),
+          Queue.take(outbox).pipe(
+            Effect.map((message) => ({
+              kind: "send" as const,
+              message,
+            })),
+          ),
         );
 
         if (wake.kind === "event") {
@@ -116,16 +169,27 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
         return yield* capacity.withPermit(
           Effect.gen(function* () {
             yield* project({ status: "running" });
-            yield* session.send(wake.content);
+            const sent = yield* sendToSession(session, wake.message);
+
+            if (!sent) {
+              return yield* Effect.void;
+            }
+
             let pending = 1;
 
             while (pending > 0) {
               const turnWake = yield* Effect.raceFirst(
                 Fiber.join(eventFiber).pipe(
-                  Effect.map((childEvent) => ({ kind: "event" as const, event: childEvent })),
+                  Effect.map((childEvent) => ({
+                    kind: "event" as const,
+                    event: childEvent,
+                  })),
                 ),
                 Queue.take(outbox).pipe(
-                  Effect.map((content) => ({ kind: "send" as const, content })),
+                  Effect.map((message) => ({
+                    kind: "send" as const,
+                    message,
+                  })),
                 ),
               );
 
@@ -135,16 +199,22 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
 
                 if (pending > 0) {
                   eventFiber = yield* session.take.pipe(
-                    Effect.forkScoped({ startImmediately: true }),
+                    Effect.forkScoped({
+                      startImmediately: true,
+                    }),
                   );
                 }
               } else {
-                yield* session.send(turnWake.content);
-                pending += 1;
+                const turnSent = yield* sendToSession(session, turnWake.message);
+
+                if (turnSent) {
+                  pending += 1;
+                }
               }
             }
 
             eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+            return yield* Effect.void;
           }),
         );
       }),
@@ -163,9 +233,17 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
             const failure = { kind: "failure", reason } as const;
 
             return Effect.uninterruptible(
-              project({ status: "failed", latestEvent: failure }).pipe(
+              project({
+                status: "failed",
+                latestEvent: failure,
+              }).pipe(
                 Effect.andThen(Queue.offer(events, failure)),
-                Effect.andThen(Deferred.succeed(result, { kind: "failed", reason })),
+                Effect.andThen(
+                  Deferred.succeed(result, {
+                    kind: "failed",
+                    reason,
+                  }),
+                ),
                 Effect.asVoid,
               ),
             );
@@ -177,14 +255,26 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
     Effect.annotateLogs({ subagentId }),
   );
 
+  const send = Effect.fn("SubagentProcess.send")(function* (content: string) {
+    if (spec.mode === "ephemeral") {
+      return undefined;
+    }
+
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const messageId = yield* generateSubagentMessageId();
+        const offered = yield* Queue.offer(outbox, { messageId, content });
+
+        return offered ? messageId : undefined;
+      }),
+    );
+  });
+
   return {
     subagentId,
     events: Stream.fromQueue(events),
     await: Deferred.await(result),
-    send:
-      spec.mode === "ephemeral"
-        ? () => Effect.succeed(false)
-        : (content: string) => Queue.offer(outbox, content),
+    send,
     run,
   } satisfies SubagentProcess;
 });

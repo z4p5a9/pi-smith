@@ -1,9 +1,20 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, ManagedRuntime, Option, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import { TestHost } from "../testing/TestHost.ts";
+import * as Link from "../host/link/Link.ts";
 import { SubagentLinkTransport } from "../host/link/Transport.ts";
 import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import * as Protocol from "../host/Protocol.ts";
@@ -386,6 +397,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const capacity = yield* SubagentCapacity;
       const testHost = yield* TestHost;
 
       yield* testHost.stub([null]);
@@ -410,12 +422,71 @@ it.describe("SubagentCoordinator", () => {
         event: { kind: "message", content: "Ready." },
       });
 
-      yield* coordinator.send(subagentId, "Review the diff.");
+      const capacityAcquired = yield* Deferred.make<void>();
+      const releaseCapacity = yield* Deferred.make<void>();
+      const capacityHolder = yield* capacity
+        .withPermit(
+          Deferred.succeed(capacityAcquired, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCapacity)),
+          ),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(capacityAcquired);
 
-      expect(yield* child.inbox.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual({
-        kind: "message",
-        content: "Review the diff.",
+      const deliveryReceived = yield* Deferred.make<void>();
+      const delivery = yield* child.inbox.pipe(
+        Stream.runHead,
+        Effect.tap(() => Deferred.succeed(deliveryReceived, undefined)),
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const oversizedContent = "x".repeat(Link.maxLinkFrameBytes);
+      const oversizedMessageId = yield* coordinator.send(subagentId, oversizedContent);
+
+      expect(oversizedMessageId).toMatch(/^msg_[a-z0-9]{24}$/);
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "waiting"),
+        Stream.runHead,
+      );
+      expect(yield* Deferred.isDone(deliveryReceived)).toBe(false);
+
+      yield* Deferred.succeed(releaseCapacity, undefined);
+
+      const actualBytes =
+        Link.maxLinkFrameBytes +
+        new TextEncoder().encode(
+          `{"v":1,"subagentId":"${subagentId}","seq":0,"data":{"kind":"message","content":""}}`,
+        ).byteLength;
+
+      expect(
+        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+      ).toEqual({
+        subagentId,
+        event: {
+          kind: "message-rejected",
+          messageId: oversizedMessageId,
+          reason: "frame-too-large",
+          actualBytes,
+          maxBytes: Link.maxLinkFrameBytes,
+        },
       });
+      expect(yield* Deferred.isDone(deliveryReceived)).toBe(false);
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "idle"),
+        Stream.runHead,
+      );
+      expect(yield* testHost.active).toEqual([subagentId]);
+
+      const smallMessageId = yield* coordinator.send(subagentId, "Review the diff.");
+
+      expect(smallMessageId).toMatch(/^msg_[a-z0-9]{24}$/);
+      expect(smallMessageId).not.toBe(oversizedMessageId);
+
+      expect(yield* Fiber.join(delivery)).toEqual(
+        Option.some({
+          kind: "message",
+          content: "Review the diff.",
+        }),
+      );
 
       yield* child.send({ kind: "message", content: "Reviewed." });
 
@@ -426,6 +497,7 @@ it.describe("SubagentCoordinator", () => {
         event: { kind: "message", content: "Reviewed." },
       });
       expect((yield* checkpoint.get(subagentId)).status).toBe("idle");
+      yield* Fiber.join(capacityHolder);
 
       yield* coordinator.kill(subagentId);
       yield* Effect.suspend(() =>
@@ -450,7 +522,7 @@ it.describe("SubagentCoordinator", () => {
               }),
             ),
           ),
-          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provideMerge(SubagentCapacity.layer(1)),
           Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),

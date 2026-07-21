@@ -35,7 +35,7 @@ it.describe("SubagentProcess", () => {
         cwd: "/worktree",
         mode: "ephemeral",
       });
-      expect(yield* process.send("Ignored.")).toBe(false);
+      expect(yield* process.send("Ignored.")).toBeUndefined();
 
       const running = yield* process.run.pipe(Effect.forkChild({ startImmediately: true }));
 
