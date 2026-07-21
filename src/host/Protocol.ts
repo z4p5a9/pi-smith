@@ -12,7 +12,9 @@ export interface SubagentListener {
 }
 
 export interface SubagentChildSession {
-  readonly send: (event: SubagentEvent) => Effect.Effect<void, Link.LinkDisconnectedError>;
+  readonly send: (
+    event: SubagentEvent,
+  ) => Effect.Effect<void, Link.LinkDisconnectedError | Link.LinkFrameTooLargeError>;
   readonly inbox: Stream.Stream<SubagentEvent>;
   readonly await: Effect.Effect<void, Link.LinkDisconnectedError | Link.LinkProtocolError>;
 }

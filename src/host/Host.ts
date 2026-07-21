@@ -1,6 +1,10 @@
 import { Context, Schema, type Effect, type Scope } from "effect";
 
-import type { LinkDisconnectedError, LinkProtocolError } from "./link/Link.ts";
+import type {
+  LinkDisconnectedError,
+  LinkFrameTooLargeError,
+  LinkProtocolError,
+} from "./link/Link.ts";
 import type { SubagentEvent } from "../subagent/SubagentEvent.ts";
 import { SubagentId } from "../subagent/SubagentId.ts";
 
@@ -13,7 +17,9 @@ export interface SubagentCommand {
 
 export interface SubagentHostSession {
   readonly take: Effect.Effect<SubagentEvent, LinkDisconnectedError | LinkProtocolError>;
-  readonly send: (content: string) => Effect.Effect<void, LinkDisconnectedError>;
+  readonly send: (
+    content: string,
+  ) => Effect.Effect<void, LinkDisconnectedError | LinkFrameTooLargeError>;
   readonly await: Effect.Effect<void, LinkDisconnectedError | LinkProtocolError>;
 }
 

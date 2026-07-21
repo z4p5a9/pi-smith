@@ -16,6 +16,14 @@ export class LinkDisconnectedError extends Schema.TaggedErrorClass<LinkDisconnec
   },
 ) {}
 
+export class LinkFrameTooLargeError extends Schema.TaggedErrorClass<LinkFrameTooLargeError>()(
+  "LinkFrameTooLargeError",
+  {
+    actualBytes: Schema.Finite,
+    maxBytes: Schema.Finite,
+  },
+) {}
+
 export class LinkProtocolError extends Schema.TaggedErrorClass<LinkProtocolError>()(
   "LinkProtocolError",
   {
@@ -45,7 +53,9 @@ const Frame = Schema.Union([
 ]);
 
 export interface Link {
-  readonly send: (data: Datagram) => Effect.Effect<void, LinkDisconnectedError>;
+  readonly send: (
+    data: Datagram,
+  ) => Effect.Effect<void, LinkDisconnectedError | LinkFrameTooLargeError>;
   readonly recv: Effect.Effect<
     { readonly data: Datagram; readonly ack: Effect.Effect<void> },
     LinkDisconnectedError | LinkProtocolError
@@ -73,8 +83,17 @@ export const make = Effect.fn("Link.make")(function* (
 
   const writeFrame = Effect.fn("Link.writeFrame")(function* (frame: typeof Frame.Type) {
     const json = yield* encodeFrame(frame).pipe(Effect.orDie);
+    const bytes = encoder.encode(`${json}\n`);
+    const actualBytes = bytes.byteLength - 1;
 
-    return yield* write(encoder.encode(`${json}\n`)).pipe(
+    if (actualBytes > maxLinkFrameBytes) {
+      return yield* LinkFrameTooLargeError.make({
+        actualBytes,
+        maxBytes: maxLinkFrameBytes,
+      });
+    }
+
+    return yield* write(bytes).pipe(
       Effect.mapError((error) => LinkDisconnectedError.make({ reason: error.message })),
     );
   });
@@ -106,7 +125,7 @@ export const make = Effect.fn("Link.make")(function* (
     const ack = delivery
       .acknowledge(
         writeFrame({ v: 1, subagentId, ack: frame.seq }).pipe(
-          Effect.catch((error) =>
+          Effect.catchTag("LinkDisconnectedError", (error) =>
             Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
           ),
         ),
@@ -200,7 +219,7 @@ export const make = Effect.fn("Link.make")(function* (
       sendDisconnected,
       sendWindow.withDelivery(({ acknowledged, sequence }) =>
         writeFrame({ v: 1, subagentId, seq: sequence, data }).pipe(
-          Effect.catch((error) =>
+          Effect.catchTag("LinkDisconnectedError", (error) =>
             Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
           ),
           Effect.andThen(acknowledged),

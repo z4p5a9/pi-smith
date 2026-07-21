@@ -83,6 +83,80 @@ it.describe("Link", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("rejects an oversized outbound frame without closing the link", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-outbound-size");
+      const listener = yield* listen("outbound-size", subagentId);
+      const client = yield* connect("outbound-size", subagentId);
+      const server = yield* listener.accept;
+      const encoder = new TextEncoder();
+      const boundaryEmpty = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: 0,
+        data: { kind: "message", content: "" },
+      }).pipe(Effect.orDie);
+      const boundaryContent = "x".repeat(
+        Link.maxLinkFrameBytes - encoder.encode(boundaryEmpty).byteLength,
+      );
+      const boundaryFrame = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: 0,
+        data: { kind: "message", content: boundaryContent },
+      }).pipe(Effect.orDie);
+
+      expect(encoder.encode(boundaryFrame).byteLength).toBe(Link.maxLinkFrameBytes);
+
+      const boundarySending = yield* client
+        .send({ kind: "message", content: boundaryContent })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const boundary = yield* server.recv;
+
+      expect(boundary.data).toEqual({ kind: "message", content: boundaryContent });
+      yield* boundary.ack;
+      yield* Fiber.join(boundarySending);
+
+      const oversizedEmpty = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: 1,
+        data: { kind: "message", content: "" },
+      }).pipe(Effect.orDie);
+      const oversizedContent =
+        "x".repeat(Link.maxLinkFrameBytes - encoder.encode(oversizedEmpty).byteLength - 1) + "π";
+      const oversizedFrame = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: 1,
+        data: { kind: "message", content: oversizedContent },
+      }).pipe(Effect.orDie);
+      const actualBytes = encoder.encode(oversizedFrame).byteLength;
+
+      expect(actualBytes).toBe(Link.maxLinkFrameBytes + 1);
+
+      const error = yield* client
+        .send({ kind: "message", content: oversizedContent })
+        .pipe(Effect.flip);
+
+      expect(Schema.is(Link.LinkFrameTooLargeError)(error)).toBe(true);
+
+      if (Schema.is(Link.LinkFrameTooLargeError)(error)) {
+        expect(error.actualBytes).toBe(actualBytes);
+        expect(error.maxBytes).toBe(Link.maxLinkFrameBytes);
+      }
+
+      const nextSending = yield* client
+        .send({ kind: "message", content: "next" })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      const next = yield* server.recv;
+
+      expect(next.data).toEqual({ kind: "message", content: "next" });
+      yield* next.ack;
+      yield* Fiber.join(nextSending);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("serializes concurrent sends until the active frame is acknowledged", () =>
     Effect.gen(function* () {
       const subagentId = yield* decodeSubagentId("sa_12345678_link-concurrent");
