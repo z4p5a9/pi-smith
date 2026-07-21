@@ -14,6 +14,7 @@ export const SubagentRecord = Schema.Struct({
     "idle",
     "completed",
     "failed",
+    "killed",
   ]),
   latestEvent: Schema.optional(SubagentEvent),
   ...SubagentSpec.fields,

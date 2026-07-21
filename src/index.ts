@@ -287,6 +287,13 @@ export default function extension(pi: ExtensionAPI): void {
                 content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
                 details: { subagentId },
               }),
+            SubagentInactiveError: () =>
+              Effect.succeed({
+                content: [
+                  { type: "text" as const, text: `Subagent ${subagentId} is no longer active.` },
+                ],
+                details: { subagentId },
+              }),
           }),
           Effect.withSpan("subagent_kill", {
             attributes: { toolCallId },

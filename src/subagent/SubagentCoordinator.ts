@@ -99,11 +99,33 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
   });
 
   const kill = Effect.fn("SubagentCoordinator.kill")(function* (subagentId: SubagentId) {
-    if (!registry.has(subagentId)) {
-      return yield* SubagentUnknownError.make({ subagentId });
-    }
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const process = registry.get(subagentId);
 
-    return yield* FiberMap.remove(children, subagentId);
+        if (process === undefined) {
+          return yield* SubagentUnknownError.make({ subagentId });
+        }
+
+        yield* FiberMap.remove(children, subagentId);
+
+        const result = yield* process.await;
+        const record = yield* checkpoint.get(subagentId);
+
+        if (
+          result.kind !== "killed" ||
+          record.status === "completed" ||
+          record.status === "failed" ||
+          record.status === "killed"
+        ) {
+          return yield* SubagentInactiveError.make({ subagentId });
+        }
+
+        return yield* checkpoint.update(subagentId, { status: "killed" });
+      }).pipe(
+        Effect.catchTag("SubagentNotFoundError", () => SubagentUnknownError.make({ subagentId })),
+      ),
+    );
   });
 
   const status = Effect.fn("SubagentCoordinator.status")(function* (subagentId: SubagentId) {

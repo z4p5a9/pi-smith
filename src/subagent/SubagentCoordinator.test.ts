@@ -21,7 +21,7 @@ import * as Protocol from "../host/Protocol.ts";
 import { SubagentHarness } from "../harness/Harness.ts";
 import { SubagentHostUnavailableError } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
-import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
+import { SubagentCheckpoint, type SubagentRecord } from "./SubagentCheckpoint.ts";
 import {
   SubagentCoordinator,
   SubagentInactiveError,
@@ -386,6 +386,7 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("does not start a subagent killed before host capacity is available", () =>
     Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const capacity = yield* SubagentCapacity;
       const testHost = yield* TestHost;
@@ -408,7 +409,9 @@ it.describe("SubagentCoordinator", () => {
         mode: "persistent",
       });
 
+      expect((yield* checkpoint.get(killedSubagentId)).status).toBe("queued");
       yield* coordinator.kill(killedSubagentId);
+      expect((yield* checkpoint.get(killedSubagentId)).status).toBe("killed");
       yield* testHost.stub([null]);
 
       const sentinelSubagentId = yield* coordinator.create({
@@ -444,6 +447,55 @@ it.describe("SubagentCoordinator", () => {
             ),
           ),
           Layer.provideMerge(SubagentCapacity.layer(1)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("projects killing a running subagent as killed", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const coordinator = yield* SubagentCoordinator;
+      const testHost = yield* TestHost;
+
+      yield* testHost.stub([null]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Running assistant",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
+      });
+
+      expect(yield* testHost.takeStart).toBe(subagentId);
+      yield* Protocol.connect(subagentId);
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "running"),
+        Stream.runHead,
+      );
+
+      yield* coordinator.kill(subagentId);
+
+      expect((yield* checkpoint.get(subagentId)).status).toBe("killed");
+      expect(yield* testHost.active).toEqual([]);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provide(SubagentCapacity.layer(10)),
           Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -621,13 +673,12 @@ it.describe("SubagentCoordinator", () => {
       yield* Fiber.join(capacityHolder);
 
       yield* coordinator.kill(subagentId);
-      yield* Effect.suspend(() =>
-        testHost.active.pipe(
-          Effect.flatMap((active) =>
-            active.length === 0 ? Effect.void : Effect.fail("Child is still active"),
-          ),
-        ),
-      ).pipe(Effect.eventually);
+      expect((yield* checkpoint.get(subagentId)).status).toBe("killed");
+      expect(yield* testHost.active).toEqual([]);
+
+      const error = yield* coordinator.kill(subagentId).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(SubagentInactiveError);
       yield* testHost.verify;
     }).pipe(
       Effect.scoped,
@@ -649,6 +700,162 @@ it.describe("SubagentCoordinator", () => {
         ),
       ),
     ),
+  );
+
+  it.effect("projects killing a waiting persistent subagent as killed", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const coordinator = yield* SubagentCoordinator;
+      const capacity = yield* SubagentCapacity;
+      const testHost = yield* TestHost;
+
+      yield* testHost.stub([null]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Waiting assistant",
+        prompt: "Stand by.",
+        cwd: "/worktree",
+        mode: "persistent",
+      });
+
+      expect(yield* testHost.takeStart).toBe(subagentId);
+
+      const child = yield* Protocol.connect(subagentId);
+
+      yield* child.send({ kind: "message", content: "Ready." });
+      yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "idle"),
+        Stream.runHead,
+      );
+
+      const capacityAcquired = yield* Deferred.make<void>();
+      const releaseCapacity = yield* Deferred.make<void>();
+      const capacityHolder = yield* capacity
+        .withPermit(
+          Deferred.succeed(capacityAcquired, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCapacity)),
+          ),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Deferred.await(capacityAcquired);
+      yield* coordinator.send(subagentId, "Review the diff.");
+      yield* checkpoint.changes(subagentId).pipe(
+        Stream.filter((record) => record.status === "waiting"),
+        Stream.runHead,
+      );
+
+      yield* coordinator.kill(subagentId);
+
+      expect((yield* checkpoint.get(subagentId)).status).toBe("killed");
+      expect(yield* testHost.active).toEqual([]);
+      yield* Deferred.succeed(releaseCapacity, undefined);
+      yield* Fiber.join(capacityHolder);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
+            ),
+          ),
+          Layer.provideMerge(SubagentCapacity.layer(1)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("preserves completed when completion races with kill", () =>
+    Effect.gen(function* () {
+      const completionProjected = yield* Deferred.make<void>();
+      const releaseProjection = yield* Deferred.make<void>();
+      const checkpoint = yield* SubagentCheckpoint.make;
+      const controlledCheckpoint = SubagentCheckpoint.of({
+        ...checkpoint,
+        update: Effect.fn("ControlledSubagentCheckpoint.update")(function* (
+          subagentId: SubagentId,
+          fields: Partial<Omit<SubagentRecord, "subagentId">>,
+        ) {
+          yield* checkpoint.update(subagentId, fields);
+
+          if (fields.status === "completed") {
+            yield* Deferred.succeed(completionProjected, undefined);
+            yield* Deferred.await(releaseProjection);
+          }
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const coordinator = yield* SubagentCoordinator;
+        const testHost = yield* TestHost;
+
+        yield* testHost.stub([null]);
+
+        const subagentId = yield* coordinator.create({
+          title: "Completing assistant",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+          mode: "ephemeral",
+        });
+
+        expect(yield* testHost.takeStart).toBe(subagentId);
+
+        const child = yield* Protocol.connect(subagentId);
+
+        yield* child.send({ kind: "message", content: "Task complete." });
+        yield* Deferred.await(completionProjected);
+
+        expect(yield* checkpoint.get(subagentId)).toMatchObject({
+          status: "completed",
+          latestEvent: { kind: "message", content: "Task complete." },
+        });
+
+        const kill = yield* coordinator
+          .kill(subagentId)
+          .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
+
+        expect(kill.pollUnsafe()).toBeUndefined();
+        yield* Deferred.succeed(releaseProjection, undefined);
+
+        const error = yield* Fiber.join(kill);
+
+        expect(error).toBeInstanceOf(SubagentInactiveError);
+        expect(yield* checkpoint.get(subagentId)).toMatchObject({
+          status: "completed",
+          latestEvent: { kind: "message", content: "Task complete." },
+        });
+        yield* testHost.verify;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          SubagentCoordinator.layer.pipe(
+            Layer.provide(Layer.succeed(SubagentCheckpoint, controlledCheckpoint)),
+            Layer.provideMerge(TestHost.layer),
+            Layer.provide(
+              Layer.succeed(
+                SubagentHarness,
+                SubagentHarness.of({
+                  makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+                }),
+              ),
+            ),
+            Layer.provide(SubagentCapacity.layer(10)),
+            Layer.provideMerge(UnixSocketTransport.layer),
+            Layer.provide(NodeFileSystem.layer),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.effect("fails sending to an unknown subagent", () =>
@@ -729,7 +936,7 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
-  it.effect("does not project Coordinator shutdown as failure", () =>
+  it.effect("does not project Coordinator shutdown as killed", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const testHost = yield* TestHost;
