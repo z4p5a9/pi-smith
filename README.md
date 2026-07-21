@@ -19,7 +19,9 @@ Smith currently:
   failed states into a best-effort in-memory checkpoint that never gates execution;
 - communicates over a Unix-socket protocol with per-frame identity and version
   validation, where acknowledgements mean "received" and the first valid frame of any
-  kind establishes the session;
+  kind establishes the session; `seq` and `ack` are non-negative safe-integer
+  correlation identifiers, receive order is physical wire order, and they provide no
+  replay protection or numeric ordering;
 - contains malformed, oversized, or misidentified connections without poisoning the
   listener, the pool, or unrelated sub-agents;
 - delivers child messages and failures as hidden root-context messages with UI

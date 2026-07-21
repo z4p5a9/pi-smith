@@ -38,17 +38,19 @@ export const Datagram = Schema.Union([
 
 export type Datagram = typeof Datagram.Type;
 
+const Sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 const Frame = Schema.Union([
   Schema.Struct({
     v: Schema.Literal(1),
     subagentId: SubagentId,
-    seq: Schema.Finite,
+    seq: Sequence,
     data: Datagram,
   }),
   Schema.Struct({
     v: Schema.Literal(1),
     subagentId: SubagentId,
-    ack: Schema.Finite,
+    ack: Sequence,
   }),
 ]);
 

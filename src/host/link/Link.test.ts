@@ -559,6 +559,97 @@ it.describe("Link", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("rejects invalid sequence numbers", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-invalid-seq");
+
+      for (const [index, seq] of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1].entries()) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const name = `invalid-seq-${index}`;
+            const listener = yield* listen(name, subagentId);
+            const socket = yield* NodeSocket.makeNet({ path: socketPath(name) });
+            const write = yield* socket.writer;
+            const frame = yield* encodeJson({
+              v: 1,
+              subagentId,
+              seq,
+              data: { kind: "hello" },
+            }).pipe(Effect.orDie);
+
+            yield* socket
+              .run(() => undefined, { onOpen: write(`${frame}\n`).pipe(Effect.orDie) })
+              .pipe(Effect.forkScoped);
+
+            const server = yield* listener.accept;
+            const error = yield* server.closed.pipe(Effect.flip);
+
+            expect(Schema.is(Link.LinkProtocolError)(error)).toBe(true);
+          }),
+        );
+      }
+    }),
+  );
+
+  it.effect("rejects invalid acknowledgement numbers", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-invalid-ack");
+
+      for (const [index, ack] of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1].entries()) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const name = `invalid-ack-${index}`;
+            const listener = yield* listen(name, subagentId);
+            const socket = yield* NodeSocket.makeNet({ path: socketPath(name) });
+            const write = yield* socket.writer;
+            const frame = yield* encodeJson({ v: 1, subagentId, ack }).pipe(Effect.orDie);
+
+            yield* socket
+              .run(() => undefined, { onOpen: write(`${frame}\n`).pipe(Effect.orDie) })
+              .pipe(Effect.forkScoped);
+
+            const server = yield* listener.accept;
+            const error = yield* server.closed.pipe(Effect.flip);
+
+            expect(Schema.is(Link.LinkProtocolError)(error)).toBe(true);
+          }),
+        );
+      }
+    }),
+  );
+
+  it.effect("accepts the maximum safe sequence and acknowledgement numbers", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-max-sequence");
+      const listener = yield* listen("max-sequence", subagentId);
+      const socket = yield* NodeSocket.makeNet({ path: socketPath("max-sequence") });
+      const write = yield* socket.writer;
+      const acknowledgement = yield* encodeJson({
+        v: 1,
+        subagentId,
+        ack: Number.MAX_SAFE_INTEGER,
+      }).pipe(Effect.orDie);
+      const frame = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: Number.MAX_SAFE_INTEGER,
+        data: { kind: "hello" },
+      }).pipe(Effect.orDie);
+
+      yield* socket
+        .run(() => undefined, {
+          onOpen: write(`${acknowledgement}\n${frame}\n`).pipe(Effect.orDie),
+        })
+        .pipe(Effect.forkScoped);
+
+      const server = yield* listener.accept;
+      const received = yield* server.recv;
+
+      expect(received.data).toEqual({ kind: "hello" });
+      yield* received.ack;
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("fails the link on an oversized frame", () =>
     Effect.gen(function* () {
       const subagentId = yield* decodeSubagentId("sa_12345678_link-oversized");
