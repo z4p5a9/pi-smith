@@ -1,4 +1,4 @@
-import { Deferred, Effect, Option, Ref, Stream } from "effect";
+import { Deferred, Effect, Stream } from "effect";
 import type * as Socket from "effect/unstable/socket/Socket";
 
 import type { SubagentHostSession } from "./Host.ts";
@@ -30,24 +30,16 @@ export const listen = Effect.fn("SubagentProtocol.listen")(function* (subagentId
     function* (socket: Socket.Socket) {
       const link = yield* Link.make(socket, subagentId);
 
-      // Establishment is the first valid datagram: identity is proven per
-      // frame by the link, so any well-formed first frame surfaces the session.
       const first = yield* link.recv;
-      const buffered = yield* Ref.make(
-        first.data.kind === "hello"
-          ? Option.none<{ readonly event: SubagentEvent; readonly ack: Effect.Effect<void> }>()
-          : Option.some({ event: first.data, ack: first.ack }),
-      );
+
+      if (first.data.kind !== "hello") {
+        return yield* Link.LinkProtocolError.make({
+          reason: `Expected hello as first subagent datagram, received ${first.data.kind}`,
+        });
+      }
 
       const take = Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const held = yield* Ref.getAndSet(buffered, Option.none());
-
-          if (Option.isSome(held)) {
-            yield* held.value.ack;
-            return held.value.event;
-          }
-
           let event: SubagentEvent | undefined;
 
           while (event === undefined) {
@@ -79,9 +71,7 @@ export const listen = Effect.fn("SubagentProtocol.listen")(function* (subagentId
         );
       }
 
-      if (first.data.kind === "hello") {
-        yield* first.ack;
-      }
+      yield* first.ack;
 
       // Session failures surface through the session itself; holding the scope
       // open here is what keeps the accepted connection alive.

@@ -2,7 +2,7 @@ import { NodeFileSystem, NodeSocket } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 
-import { LinkDisconnectedError, maxLinkFrameBytes } from "./link/Link.ts";
+import { LinkDisconnectedError, LinkProtocolError, maxLinkFrameBytes } from "./link/Link.ts";
 import * as UnixSocketTransport from "./link/unix/UnixSocketTransport.ts";
 import * as Protocol from "./Protocol.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
@@ -126,14 +126,19 @@ it.describe("SubagentProtocol", () => {
     ),
   );
 
-  it.effect("surfaces the session on an event-first connection", () =>
+  it.effect("requires hello before surfacing a session", () =>
     Effect.gen(function* () {
       const subagentId = yield* decodeSubagentId("sa_12345678_protocol-event-first");
       const listener = yield* Protocol.listen(subagentId);
+      const accepting = yield* listener.accept.pipe(Effect.forkChild({ startImmediately: true }));
+
+      expect(accepting.pollUnsafe()).toBeUndefined();
+
       const socket = yield* NodeSocket.makeNet({
         path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
       });
       const write = yield* socket.writer;
+      const eventWritten = yield* Deferred.make<void>();
       const event = yield* encodeJson({
         v: 1,
         subagentId,
@@ -141,14 +146,26 @@ it.describe("SubagentProtocol", () => {
         data: { kind: "message", content: "Task complete." },
       }).pipe(Effect.orDie);
 
-      yield* socket
-        .run(() => undefined, { onOpen: write(`${event}\n`).pipe(Effect.orDie) })
+      const invalidConnection = yield* socket
+        .run(() => undefined, {
+          onOpen: write(`${event}\n`).pipe(
+            Effect.andThen(Deferred.succeed(eventWritten, undefined)),
+            Effect.orDie,
+          ),
+        })
         .pipe(Effect.forkScoped);
 
-      const root = yield* listener.accept;
-      const delivered = yield* root.take;
+      yield* Deferred.await(eventWritten);
+      yield* Fiber.await(invalidConnection);
 
-      expect(delivered).toEqual({ kind: "message", content: "Task complete." });
+      expect(accepting.pollUnsafe()).toBeUndefined();
+
+      const connecting = yield* Protocol.connect(subagentId).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* Fiber.join(accepting);
+      yield* Fiber.join(connecting);
     }).pipe(
       Effect.scoped,
       Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
@@ -298,6 +315,57 @@ it.describe("SubagentProtocol", () => {
       );
       yield* listener.accept;
       yield* Fiber.join(connecting);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+    ),
+  );
+
+  it.effect("rejects a wrong subagent ID after establishing the session", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_protocol-established-identity");
+      const otherSubagentId = yield* decodeSubagentId("sa_87654321_other-established");
+      const listener = yield* Protocol.listen(subagentId);
+      const socket = yield* NodeSocket.makeNet({
+        path: `/tmp/smith-${process.getuid?.() ?? 0}/${subagentId}.sock`,
+      });
+      const write = yield* socket.writer;
+      const helloAcknowledged = yield* Deferred.make<void>();
+      let output = "";
+      const hello = yield* encodeJson({
+        v: 1,
+        subagentId,
+        seq: 0,
+        data: { kind: "hello" },
+      }).pipe(Effect.orDie);
+      const event = yield* encodeJson({
+        v: 1,
+        subagentId: otherSubagentId,
+        seq: 1,
+        data: { kind: "message", content: "Wrong identity." },
+      }).pipe(Effect.orDie);
+
+      const connection = yield* socket
+        .runString(
+          (chunk) => {
+            output += chunk;
+
+            return output.includes('"ack":0')
+              ? Deferred.succeed(helloAcknowledged, undefined)
+              : Effect.void;
+          },
+          { onOpen: write(`${hello}\n`).pipe(Effect.orDie) },
+        )
+        .pipe(Effect.forkScoped);
+
+      const root = yield* listener.accept;
+      yield* Deferred.await(helloAcknowledged);
+      yield* write(`${event}\n`).pipe(Effect.orDie);
+      yield* Fiber.await(connection);
+
+      const error = yield* root.await.pipe(Effect.flip);
+
+      expect(Schema.is(LinkProtocolError)(error)).toBe(true);
     }).pipe(
       Effect.scoped,
       Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
