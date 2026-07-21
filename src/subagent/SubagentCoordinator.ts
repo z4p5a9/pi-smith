@@ -49,15 +49,21 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
         ),
       );
 
-      registry.set(admission.subagentId, process);
-      yield* FiberMap.run(
-        children,
-        admission.subagentId,
-        Effect.all([process.run, aggregate], { concurrency: "unbounded", discard: true }),
-        { startImmediately: true },
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          registry.set(admission.subagentId, process);
+          yield* FiberMap.run(
+            children,
+            admission.subagentId,
+            Effect.all([process.run, aggregate], {
+              concurrency: "unbounded",
+              discard: true,
+            }).pipe(Effect.ensuring(Effect.sync(() => registry.delete(admission.subagentId)))),
+            { startImmediately: true },
+          );
+          yield* Deferred.succeed(admission.ready, undefined);
+        }),
       );
-
-      yield* Deferred.succeed(admission.ready, undefined);
     }),
   ).pipe(Effect.forkScoped({ startImmediately: true }));
 
@@ -86,7 +92,11 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     const process = registry.get(subagentId);
 
     if (process === undefined) {
-      return yield* SubagentUnknownError.make({ subagentId });
+      if (!(yield* checkpoint.has(subagentId))) {
+        return yield* SubagentUnknownError.make({ subagentId });
+      }
+
+      return yield* SubagentInactiveError.make({ subagentId });
     }
 
     const messageId = yield* process.send(content);
@@ -104,7 +114,11 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
         const process = registry.get(subagentId);
 
         if (process === undefined) {
-          return yield* SubagentUnknownError.make({ subagentId });
+          if (!(yield* checkpoint.has(subagentId))) {
+            return yield* SubagentUnknownError.make({ subagentId });
+          }
+
+          return yield* SubagentInactiveError.make({ subagentId });
         }
 
         yield* FiberMap.remove(children, subagentId);

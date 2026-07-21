@@ -112,6 +112,26 @@ it.describe("SubagentCheckpoint", () => {
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
 
+  it.effect("checks whether a subagent record exists", () =>
+    Effect.gen(function* () {
+      const checkpoint = yield* SubagentCheckpoint;
+      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+
+      expect(yield* checkpoint.has(subagentId)).toBe(false);
+
+      yield* checkpoint.put({
+        subagentId,
+        status: "queued",
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral" as const,
+      });
+
+      expect(yield* checkpoint.has(subagentId)).toBe(true);
+    }).pipe(Effect.provide(SubagentCheckpoint.layer)),
+  );
+
   it.effect("emits the current subagent record", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;

@@ -81,6 +81,11 @@ const make = Effect.gen(function* () {
     return record;
   });
 
+  const has = Effect.fn("SubagentCheckpoint.has")(function* (subagentId: SubagentId) {
+    const ref = yield* SubscriptionRef.get(records);
+    return ref.has(subagentId);
+  });
+
   const changes = (subagentId: SubagentId) =>
     SubscriptionRef.changes(records).pipe(
       Stream.mapEffect((ref) => {
@@ -95,7 +100,7 @@ const make = Effect.gen(function* () {
       Stream.changes,
     );
 
-  return { put, update, get, changes };
+  return { put, update, get, has, changes };
 });
 
 export class SubagentCheckpoint extends Context.Service<SubagentCheckpoint>()(
