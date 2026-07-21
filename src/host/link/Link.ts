@@ -1,20 +1,11 @@
-import {
-  Cause,
-  Deferred,
-  Effect,
-  Exit,
-  Queue,
-  Ref,
-  Schema,
-  Semaphore,
-  type Scope,
-  Stream,
-} from "effect";
+import { Cause, Deferred, Effect, Exit, Queue, Schema, type Scope, Stream } from "effect";
 import * as Ndjson from "effect/unstable/encoding/Ndjson";
 import * as Socket from "effect/unstable/socket/Socket";
 
 import { SubagentEvent } from "../../subagent/SubagentEvent.ts";
 import { SubagentId } from "../../subagent/SubagentId.ts";
+import * as ReceiveWindow from "./ReceiveWindow.ts";
+import * as SendWindow from "./SendWindow.ts";
 
 export const maxLinkFrameBytes = 1024 * 1024;
 
@@ -74,21 +65,11 @@ export const make = Effect.fn("Link.make")(function* (
     { readonly data: Datagram; readonly ack: Effect.Effect<void> },
     Cause.Done
   >(1);
-  const sendWindow = yield* Semaphore.make(1);
-  const inboundDeliveryLease = yield* Ref.make<
-    | { readonly state: "available" }
-    | { readonly state: "held"; readonly seq: number; readonly identity: object }
-    | { readonly state: "acknowledging"; readonly seq: number; readonly identity: object }
-  >({ state: "available" });
-  const outbound = yield* Ref.make<{
-    readonly nextSequence: number;
-    readonly active?: {
-      readonly seq: number;
-      readonly acked: Deferred.Deferred<void, LinkDisconnectedError>;
-    };
-  }>({ nextSequence: 0 });
+  const sendWindow = yield* SendWindow.make();
   const lifetime = yield* Deferred.make<void, LinkDisconnectedError | LinkProtocolError>();
-  const inboundByteCount = yield* Ref.make(0);
+  const receiveWindow = yield* ReceiveWindow.make({
+    stopped: Deferred.await(lifetime).pipe(Effect.exit, Effect.asVoid),
+  });
 
   const writeFrame = Effect.fn("Link.writeFrame")(function* (frame: typeof Frame.Type) {
     const json = yield* encodeFrame(frame).pipe(Effect.orDie);
@@ -106,63 +87,31 @@ export const make = Effect.fn("Link.make")(function* (
     }
 
     if ("ack" in frame) {
-      const active = (yield* Ref.get(outbound)).active;
-
-      if (active === undefined || active.seq !== frame.ack) {
+      if (!(yield* sendWindow.acknowledge(frame.ack))) {
         return yield* Effect.logDebug("Dropped unmatched link ack").pipe(
           Effect.annotateLogs({ ack: frame.ack }),
         );
       }
 
-      return yield* Deferred.succeed(active.acked, undefined).pipe(Effect.asVoid);
+      return yield* Effect.void;
     }
 
-    const identity = {};
-    const previous = yield* Ref.modify(
-      inboundDeliveryLease,
-      (current) =>
-        [
-          current,
-          current.state === "available"
-            ? { state: "held" as const, seq: frame.seq, identity }
-            : current,
-        ] as const,
+    const delivery = yield* receiveWindow.admit(frame.seq).pipe(
+      Effect.mapError(({ heldSequence }) =>
+        LinkProtocolError.make({
+          reason: `Received data frame ${frame.seq} while frame ${heldSequence} remains unacknowledged`,
+        }),
+      ),
     );
-
-    if (previous.state !== "available") {
-      return yield* LinkProtocolError.make({
-        reason: `Received data frame ${frame.seq} while frame ${previous.seq} remains unacknowledged`,
-      });
-    }
-
-    const ack = Effect.uninterruptible(
-      Effect.gen(function* () {
-        const claimed = yield* Ref.modify(inboundDeliveryLease, (current) =>
-          current.state === "held" && current.identity === identity
-            ? ([true, { state: "acknowledging" as const, seq: frame.seq, identity }] as const)
-            : ([false, current] as const),
-        );
-
-        if (!claimed) {
-          return;
-        }
-
-        const written = yield* Effect.raceFirst(
-          writeFrame({ v: 1, subagentId, ack: frame.seq }).pipe(Effect.as(true as const)),
-          Deferred.await(lifetime).pipe(Effect.exit, Effect.as(false as const)),
-        ).pipe(
-          Effect.catch((error) => Deferred.fail(lifetime, error).pipe(Effect.as(false as const))),
-        );
-
-        if (written) {
-          yield* Ref.update(inboundDeliveryLease, (current) =>
-            current.state === "acknowledging" && current.identity === identity
-              ? { state: "available" as const }
-              : current,
-          );
-        }
-      }),
-    );
+    const ack = delivery
+      .acknowledge(
+        writeFrame({ v: 1, subagentId, ack: frame.seq }).pipe(
+          Effect.catch((error) =>
+            Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
+          ),
+        ),
+      )
+      .pipe(Effect.ignore);
 
     const offered = yield* Queue.offer(inbound, {
       data: frame.data,
@@ -178,33 +127,33 @@ export const make = Effect.fn("Link.make")(function* (
     return yield* Effect.void;
   });
 
+  let inboundFrameBytes = 0;
+  const validateInboundChunk = Effect.fn("Link.validateInboundChunk")(function* (
+    chunk: Uint8Array,
+  ) {
+    for (const byte of chunk) {
+      if (byte === 0x0a) {
+        inboundFrameBytes = 0;
+        continue;
+      }
+
+      inboundFrameBytes += 1;
+
+      if (inboundFrameBytes > maxLinkFrameBytes) {
+        return yield* LinkProtocolError.make({
+          reason: `Link frame exceeds ${maxLinkFrameBytes} bytes`,
+        });
+      }
+    }
+
+    return chunk;
+  });
+
   // The write side goes through `write` directly; the channel is read-only and
   // `Stream.never` keeps its input open so the socket is never half-closed.
   const reader = Stream.never.pipe(
     Stream.pipeThroughChannel(Socket.toChannel(socket)),
-    Stream.mapEffect((chunk) =>
-      Effect.gen(function* () {
-        let count = yield* Ref.get(inboundByteCount);
-
-        for (const byte of chunk) {
-          if (byte === 0x0a) {
-            count = 0;
-            continue;
-          }
-
-          count += 1;
-
-          if (count > maxLinkFrameBytes) {
-            return yield* LinkProtocolError.make({
-              reason: `Link frame exceeds ${maxLinkFrameBytes} bytes`,
-            });
-          }
-        }
-
-        yield* Ref.set(inboundByteCount, count);
-        return chunk;
-      }),
-    ),
+    Stream.mapEffect(validateInboundChunk),
     Stream.pipeThroughChannel(Ndjson.decodeSchema(Frame)()),
     Stream.runForEach(handleFrame),
     Effect.catchReason("SocketError", "SocketCloseError", (reason, error) =>
@@ -247,42 +196,22 @@ export const make = Effect.fn("Link.make")(function* (
   );
 
   const send = Effect.fn("Link.send")(function* (data: Datagram) {
-    return yield* Effect.uninterruptibleMask((restore) =>
-      Effect.gen(function* () {
-        const permits = yield* restore(Effect.raceFirst(sendDisconnected, sendWindow.take(1)));
-        const acked = yield* Deferred.make<void, LinkDisconnectedError>();
-        const seq = yield* Ref.modify(outbound, (current) => [
-          current.nextSequence,
-          {
-            nextSequence: current.nextSequence + 1,
-            active: { seq: current.nextSequence, acked },
-          },
-        ]);
-
-        return yield* restore(
-          Effect.raceFirst(
-            sendDisconnected,
-            writeFrame({ v: 1, subagentId, seq, data }).pipe(
-              Effect.catch((error) =>
-                Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
-              ),
-              Effect.andThen(Deferred.await(acked)),
-            ),
+    return yield* Effect.raceFirst(
+      sendDisconnected,
+      sendWindow.withDelivery(({ acknowledged, sequence }) =>
+        writeFrame({ v: 1, subagentId, seq: sequence, data }).pipe(
+          Effect.catch((error) =>
+            Deferred.fail(lifetime, error).pipe(Effect.andThen(Effect.fail(error))),
           ),
-        ).pipe(
+          Effect.andThen(acknowledged),
           Effect.onInterrupt(() =>
             Deferred.fail(
               lifetime,
               LinkDisconnectedError.make({ reason: "Link send interrupted" }),
             ).pipe(Effect.asVoid),
           ),
-          Effect.ensuring(
-            Ref.update(outbound, (current) => ({
-              nextSequence: current.nextSequence,
-            })).pipe(Effect.andThen(sendWindow.release(permits))),
-          ),
-        );
-      }),
+        ),
+      ),
     );
   });
 

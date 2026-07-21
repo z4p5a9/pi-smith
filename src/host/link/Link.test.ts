@@ -504,4 +504,76 @@ it.describe("Link", () => {
       expect(Schema.is(Link.LinkProtocolError)(error)).toBe(true);
     }).pipe(Effect.scoped),
   );
+
+  it.effect("fails an oversized frame accumulated across socket writes", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-oversized-split");
+      const listener = yield* listen("oversized-split", subagentId);
+      const socket = yield* NodeSocket.makeNet({ path: socketPath("oversized-split") });
+      const write = yield* socket.writer;
+      const firstWritten = yield* Deferred.make<void>();
+      const first = "x".repeat(Math.floor(Link.maxLinkFrameBytes / 2));
+      const second = "x".repeat(Link.maxLinkFrameBytes - first.length + 1);
+
+      yield* socket
+        .run(() => undefined, {
+          onOpen: write(first).pipe(
+            Effect.orDie,
+            Effect.andThen(Deferred.succeed(firstWritten, undefined)),
+            Effect.asVoid,
+          ),
+        })
+        .pipe(Effect.forkScoped);
+
+      yield* Deferred.await(firstWritten);
+
+      const server = yield* listener.accept;
+
+      yield* write(second).pipe(Effect.orDie);
+
+      const error = yield* server.closed.pipe(Effect.flip, Effect.timeout("1 second"));
+
+      expect(Schema.is(Link.LinkProtocolError)(error)).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("resets inbound byte counting after each newline", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_link-frame-size-reset");
+      const listener = yield* listen("frame-size-reset", subagentId);
+      const socket = yield* NodeSocket.makeNet({ path: socketPath("frame-size-reset") });
+      const write = yield* socket.writer;
+      const content = "x".repeat(Math.floor(Link.maxLinkFrameBytes * 0.6));
+      const frames = yield* Effect.forEach(
+        [
+          { v: 1, subagentId, seq: 0, data: { kind: "message", content } },
+          { v: 1, subagentId, seq: 1, data: { kind: "message", content } },
+        ],
+        (frame) => encodeJson(frame).pipe(Effect.orDie),
+      );
+
+      expect(new TextEncoder().encode(frames[0]).byteLength).toBeLessThan(Link.maxLinkFrameBytes);
+      expect(new TextEncoder().encode(frames.join("")).byteLength).toBeGreaterThan(
+        Link.maxLinkFrameBytes,
+      );
+
+      yield* socket
+        .run(() => undefined, {
+          onOpen: write(`${frames[0]}\n`).pipe(Effect.orDie),
+        })
+        .pipe(Effect.forkScoped);
+
+      const server = yield* listener.accept;
+      const first = yield* server.recv;
+
+      expect(first.data.kind).toBe("message");
+      yield* first.ack;
+      yield* write(`${frames[1]}\n`).pipe(Effect.orDie);
+
+      const second = yield* server.recv;
+
+      expect(second.data.kind).toBe("message");
+      yield* second.ack;
+    }).pipe(Effect.scoped),
+  );
 });
