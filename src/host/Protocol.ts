@@ -15,7 +15,7 @@ export interface SubagentChildSession {
   readonly send: (
     event: SubagentEvent,
   ) => Effect.Effect<void, Link.LinkDisconnectedError | Link.LinkFrameTooLargeError>;
-  readonly inbox: Stream.Stream<SubagentEvent>;
+  readonly inbox: Stream.Stream<SubagentEvent, Link.LinkDisconnectedError | Link.LinkProtocolError>;
   readonly await: Effect.Effect<void, Link.LinkDisconnectedError | Link.LinkProtocolError>;
 }
 
@@ -124,7 +124,7 @@ export const connect = Effect.fn("SubagentProtocol.connect")(function* (subagent
         return datagram;
       }),
     ),
-  ).pipe(Stream.catchCause(() => Stream.empty));
+  ).pipe(Stream.catch(() => Stream.fromEffectDrain(link.closed)));
 
   return {
     send: (event: SubagentEvent) => link.send(event),

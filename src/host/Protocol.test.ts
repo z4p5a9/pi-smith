@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect";
 
 import { LinkDisconnectedError, LinkProtocolError, maxLinkFrameBytes } from "./link/Link.ts";
+import { SubagentLinkTransport } from "./link/Transport.ts";
 import * as UnixSocketTransport from "./link/unix/UnixSocketTransport.ts";
 import * as Protocol from "./Protocol.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
@@ -289,6 +290,71 @@ it.describe("SubagentProtocol", () => {
     ),
   );
 
+  it.effect("surfaces the same protocol error through the child inbox and await", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_protocol-child-version");
+      const transport = yield* SubagentLinkTransport;
+      const server = yield* transport.listen(subagentId);
+      const sendInvalidFrame = yield* Deferred.make<void>();
+      const acknowledgement = yield* encodeJson({
+        v: 1,
+        subagentId,
+        ack: 0,
+      }).pipe(Effect.orDie);
+      const invalidFrame = yield* encodeJson({
+        v: 2,
+        subagentId,
+        seq: 0,
+        data: { kind: "message", content: "Wrong version." },
+      }).pipe(Effect.orDie);
+
+      yield* server
+        .run((socket) =>
+          Effect.gen(function* () {
+            const write = yield* socket.writer;
+            let acknowledged = false;
+
+            yield* socket.runString(() => {
+              if (acknowledged) {
+                return Effect.void;
+              }
+
+              acknowledged = true;
+
+              return write(`${acknowledgement}\n`).pipe(
+                Effect.andThen(Deferred.await(sendInvalidFrame)),
+                Effect.andThen(write(`${invalidFrame}\n`)),
+                Effect.orDie,
+              );
+            });
+          }).pipe(Effect.scoped),
+        )
+        .pipe(Effect.forkScoped);
+
+      const child = yield* Protocol.connect(subagentId);
+      const inbox = yield* child.inbox.pipe(
+        Stream.runDrain,
+        Effect.flip,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const awaiting = yield* child.await.pipe(
+        Effect.flip,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* Deferred.succeed(sendInvalidFrame, undefined);
+
+      const inboxError = yield* Fiber.join(inbox);
+      const awaitError = yield* Fiber.join(awaiting);
+
+      expect(Schema.is(LinkProtocolError)(inboxError)).toBe(true);
+      expect(inboxError).toBe(awaitError);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+    ),
+  );
+
   it.effect("rejects a wrong subagent ID without poisoning the listener", () =>
     Effect.gen(function* () {
       const subagentId = yield* decodeSubagentId("sa_12345678_protocol-identity");
@@ -445,6 +511,38 @@ it.describe("SubagentProtocol", () => {
         .pipe(Effect.flip);
 
       expect(Schema.is(LinkDisconnectedError)(sendError)).toBe(true);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+    ),
+  );
+
+  it.effect("completes the child inbox and await when the root listener closes", () =>
+    Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_protocol-root-close");
+      const listenerScope = yield* Scope.make();
+      const listener = yield* Protocol.listen(subagentId).pipe(Scope.provide(listenerScope));
+      const connecting = yield* Protocol.connect(subagentId).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* listener.accept;
+
+      const child = yield* Fiber.join(connecting);
+      const inbox = yield* child.inbox.pipe(
+        Stream.runDrain,
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const awaiting = yield* child.await.pipe(
+        Effect.exit,
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* Scope.close(listenerScope, Exit.void);
+
+      expect(Exit.isSuccess(yield* Fiber.join(inbox))).toBe(true);
+      expect(Exit.isSuccess(yield* Fiber.join(awaiting))).toBe(true);
     }).pipe(
       Effect.scoped,
       Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),

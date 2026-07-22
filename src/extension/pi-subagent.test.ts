@@ -3,11 +3,15 @@ import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
 
 import * as Protocol from "../host/Protocol.ts";
+import { LinkDisconnectedError, LinkProtocolError } from "../host/link/Link.ts";
+import { SubagentLinkTransport } from "../host/link/Transport.ts";
 import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
 import { decodeSubagentId } from "../subagent/SubagentId.ts";
+
+const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
 it.describe("Pi subagent extension", () => {
   it.effect("reports a settled assistant response without shutting itself down", () => {
@@ -438,11 +442,180 @@ it.describe("Pi subagent extension", () => {
     );
   });
 
-  it.effect("requests shutdown when the link connection ends", () => {
-    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_review-api");
+  it.effect("logs a root protocol failure once before requesting shutdown once", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_extension-version");
 
     return Effect.gen(function* () {
-      const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
+      const subagentId = yield* decodeSubagentId("sa_12345678_extension-version");
+      const transport = yield* SubagentLinkTransport;
+      const server = yield* transport.listen(subagentId);
+      const sendInvalidFrame = yield* Deferred.make<void>();
+      const acknowledgement = yield* encodeJson({ v: 1, subagentId, ack: 0 }).pipe(Effect.orDie);
+      const invalidFrame = yield* encodeJson({
+        v: 2,
+        subagentId,
+        seq: 0,
+        data: { kind: "message", content: "Wrong version." },
+      }).pipe(Effect.orDie);
+
+      yield* server
+        .run((socket) =>
+          Effect.gen(function* () {
+            const write = yield* socket.writer;
+            let acknowledged = false;
+
+            yield* socket.runString(() => {
+              if (acknowledged) {
+                return Effect.void;
+              }
+
+              acknowledged = true;
+
+              return write(`${acknowledgement}\n`).pipe(
+                Effect.andThen(Deferred.await(sendInvalidFrame)),
+                Effect.andThen(write(`${invalidFrame}\n`)),
+                Effect.orDie,
+              );
+            });
+          }).pipe(Effect.scoped),
+        )
+        .pipe(Effect.forkScoped);
+
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
+      const shutdownObserved = yield* Deferred.make<void>();
+      const observations: Array<ReadonlyArray<unknown>> = [];
+
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const log = console.log;
+          console.log = (...args: Array<unknown>) => {
+            observations.push(args.slice(1));
+          };
+          return log;
+        }),
+        () =>
+          Effect.gen(function* () {
+            const starting = yield* Effect.promise(() =>
+              start(
+                { type: "session_start" },
+                {
+                  shutdown: () => {
+                    observations.push(["shutdown"]);
+                    queueMicrotask(() => {
+                      Deferred.doneUnsafe(shutdownObserved, Effect.void);
+                    });
+                  },
+                },
+              ),
+            ).pipe(Effect.forkChild({ startImmediately: true }));
+
+            yield* Fiber.join(starting);
+            yield* Deferred.succeed(sendInvalidFrame, undefined);
+            yield* Deferred.await(shutdownObserved);
+          }),
+        (log) =>
+          Effect.sync(() => {
+            console.log = log;
+          }),
+      );
+
+      expect(observations).toHaveLength(2);
+      expect(observations[0]?.[0]).toBe("Subagent link failed");
+      expect(Schema.is(LinkProtocolError)(observations[0]?.[1])).toBe(true);
+      expect(observations[0]?.[2]).toEqual({ subagentId });
+      expect(observations[1]).toEqual(["shutdown"]);
+
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+      yield* Effect.promise(() => shutdown());
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
+
+  it.effect("logs a startup connection failure once before requesting shutdown once", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_extension-connect-failure");
+
+    return Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_extension-connect-failure");
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
+      const shutdownObserved = yield* Deferred.make<void>();
+      const observations: Array<ReadonlyArray<unknown>> = [];
+      let startupError: unknown;
+
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const log = console.log;
+          console.log = (...args: Array<unknown>) => {
+            observations.push(args.slice(1));
+          };
+          return log;
+        }),
+        () =>
+          Effect.gen(function* () {
+            startupError = yield* Effect.promise(() =>
+              start(
+                { type: "session_start" },
+                {
+                  shutdown: () => {
+                    observations.push(["shutdown"]);
+                    queueMicrotask(() => {
+                      Deferred.doneUnsafe(shutdownObserved, Effect.void);
+                    });
+                  },
+                },
+              ).then(
+                () => undefined,
+                (error: unknown) => error,
+              ),
+            );
+
+            yield* Deferred.await(shutdownObserved);
+          }),
+        (log) =>
+          Effect.sync(() => {
+            console.log = log;
+          }),
+      );
+
+      expect(startupError).toBeInstanceOf(Error);
+      expect(observations).toHaveLength(2);
+      expect(observations[0]?.[0]).toBe("Subagent link failed");
+      expect(Schema.is(LinkDisconnectedError)(observations[0]?.[1])).toBe(true);
+      expect(observations[0]?.[2]).toEqual({ subagentId });
+      expect(observations[1]).toEqual(["shutdown"]);
+
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+      yield* Effect.promise(() => shutdown());
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
+
+  it.effect("requests shutdown once without logging when the root closes", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_extension-close");
+
+    return Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_extension-close");
       const listenerScope = yield* Scope.make();
       const listener = yield* Protocol.listen(subagentId).pipe(Scope.provide(listenerScope));
       const result = yield* Effect.promise(() =>
@@ -454,31 +627,130 @@ it.describe("Pi subagent extension", () => {
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
       const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
-      let shutdownRequested = false;
+      const shutdownObserved = yield* Deferred.make<void>();
+      const observations: Array<ReadonlyArray<unknown>> = [];
 
-      const starting = yield* Effect.promise(() =>
-        start(
-          { type: "session_start" },
-          {
-            shutdown: () => {
-              shutdownRequested = true;
-            },
-          },
-        ),
-      ).pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const log = console.log;
+          console.log = (...args: Array<unknown>) => {
+            observations.push(args.slice(1));
+          };
+          return log;
+        }),
+        () =>
+          Effect.gen(function* () {
+            const starting = yield* Effect.promise(() =>
+              start(
+                { type: "session_start" },
+                {
+                  shutdown: () => {
+                    observations.push(["shutdown"]);
+                    queueMicrotask(() => {
+                      Deferred.doneUnsafe(shutdownObserved, Effect.void);
+                    });
+                  },
+                },
+              ),
+            ).pipe(Effect.forkChild({ startImmediately: true }));
 
-      yield* listener.accept;
-      yield* Fiber.join(starting);
+            yield* listener.accept;
+            yield* Fiber.join(starting);
+            yield* Scope.close(listenerScope, Exit.void);
+            yield* Deferred.await(shutdownObserved);
+          }),
+        (log) =>
+          Effect.sync(() => {
+            console.log = log;
+          }),
+      );
 
-      expect(shutdownRequested).toBe(false);
-
-      yield* Scope.close(listenerScope, Exit.void);
-      yield* Effect.suspend(() =>
-        shutdownRequested ? Effect.void : Effect.fail("Shutdown not requested"),
-      ).pipe(Effect.eventually);
+      expect(observations).toEqual([["shutdown"]]);
 
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+      yield* Effect.promise(() => shutdown());
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(UnixSocketTransport.layer.pipe(Layer.provide(NodeFileSystem.layer))),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
 
+  it.effect("logs a Pi delivery defect once before requesting shutdown once", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", "sa_12345678_extension-delivery");
+
+    return Effect.gen(function* () {
+      const subagentId = yield* decodeSubagentId("sa_12345678_extension-delivery");
+      const listener = yield* Protocol.listen(subagentId);
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const deliveryError = new Error("Pi rejected the root message");
+      result.runtime.sendMessage = () => {
+        throw deliveryError;
+      };
+      const start = yield* Effect.fromNullishOr(loaded.handlers.get("session_start")?.[0]);
+      const shutdownObserved = yield* Deferred.make<void>();
+      const observations: Array<ReadonlyArray<unknown>> = [];
+
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const log = console.log;
+          console.log = (...args: Array<unknown>) => {
+            observations.push(args.slice(1));
+          };
+          return log;
+        }),
+        () =>
+          Effect.gen(function* () {
+            const starting = yield* Effect.promise(() =>
+              start(
+                { type: "session_start" },
+                {
+                  shutdown: () => {
+                    observations.push(["shutdown"]);
+                    queueMicrotask(() => {
+                      Deferred.doneUnsafe(shutdownObserved, Effect.void);
+                    });
+                  },
+                },
+              ),
+            ).pipe(Effect.forkChild({ startImmediately: true }));
+            const session = yield* listener.accept;
+
+            yield* Fiber.join(starting);
+            yield* session.send("Review the diff.");
+
+            const sessionManager = SessionManager.inMemory("/tmp/smith-extension-test");
+            const settle = yield* Effect.fromNullishOr(loaded.handlers.get("agent_settled")?.[0]);
+            const settling = yield* Effect.promise(() =>
+              settle({ type: "agent_settled" }, { sessionManager }),
+            ).pipe(Effect.forkChild({ startImmediately: true }));
+
+            expect(yield* session.take).toEqual({
+              kind: "failure",
+              reason: "Pi settled without an assistant response",
+            });
+            yield* Fiber.join(settling);
+            yield* Deferred.await(shutdownObserved);
+          }),
+        (log) =>
+          Effect.sync(() => {
+            console.log = log;
+          }),
+      );
+
+      expect(observations).toEqual([
+        ["Failed to deliver root message to Pi", deliveryError, { subagentId }],
+        ["shutdown"],
+      ]);
+
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
       yield* Effect.promise(() => shutdown());
     }).pipe(
       Effect.scoped,

@@ -28,7 +28,15 @@ export default function extension(pi: ExtensionAPI): void {
   let shuttingDown = false;
 
   pi.on("session_start", (_event, ctx) => {
-    const starting = runtime.runPromise(ChildSession.use((session) => session.start));
+    const starting = runtime.runPromise(
+      ChildSession.use((session) => session.start).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Subagent link failed", error).pipe(
+            Effect.annotateLogs({ subagentId }),
+          ),
+        ),
+      ),
+    );
 
     // Root messages wait for the preceding Pi run to settle and report before
     // they start a new run; other root datagrams have no child-side meaning.
@@ -59,38 +67,32 @@ export default function extension(pi: ExtensionAPI): void {
                     },
                     { triggerTurn: true },
                   );
-                });
+                }).pipe(
+                  Effect.tapDefect((error) =>
+                    Effect.logError("Failed to deliver root message to Pi", error).pipe(
+                      Effect.annotateLogs({ subagentId }),
+                    ),
+                  ),
+                );
               }),
+            ),
+          ).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Subagent link failed", error).pipe(
+                Effect.annotateLogs({ subagentId }),
+              ),
             ),
           ),
         ),
       )
-      .then(
-        () => {
-          if (!shuttingDown) {
-            ctx.shutdown();
-          }
-        },
-        () => {
-          if (!shuttingDown) {
-            ctx.shutdown();
-          }
-        },
-      );
-
-    // The link connection ending means the root released this subagent.
-    void starting
-      .then(() =>
-        runtime.runPromise(ChildSession.use((session) => session.await.pipe(Effect.ignore))),
-      )
-      .then(
-        () => {
-          if (!shuttingDown) {
-            ctx.shutdown();
-          }
-        },
-        () => undefined,
-      );
+      .catch(() => undefined)
+      .then(() => {
+        if (!shuttingDown) {
+          shuttingDown = true;
+          ctx.shutdown();
+        }
+      })
+      .catch(() => undefined);
 
     return starting;
   });
