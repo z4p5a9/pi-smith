@@ -24,7 +24,7 @@ it.describe("PiSubagentHarness", () => {
         args: [
           process.argv[1],
           "--extension",
-          fileURLToPath(new URL("../../extension/pi-subagent.ts", import.meta.url)),
+          fileURLToPath(new URL("./extension/index.ts", import.meta.url)),
           "--name",
           "Review API",
           "Complete the task.",

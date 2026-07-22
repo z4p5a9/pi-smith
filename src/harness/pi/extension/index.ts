@@ -2,9 +2,9 @@ import { NodeFileSystem } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
 
-import { ChildSession } from "../harness/pi/ChildSession.ts";
-import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
-import { SubagentId } from "../subagent/SubagentId.ts";
+import * as UnixSocketTransport from "../../../host/link/unix/UnixSocketTransport.ts";
+import { SubagentId } from "../../../subagent/SubagentId.ts";
+import { PiSubagentSession } from "./PiSubagentSession.ts";
 
 export default function extension(pi: ExtensionAPI): void {
   const subagentId = Effect.runSync(
@@ -17,7 +17,7 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   const runtime = ManagedRuntime.make(
-    ChildSession.layer(subagentId).pipe(
+    PiSubagentSession.layer(subagentId).pipe(
       Layer.provide(UnixSocketTransport.layer),
       Layer.provide(NodeFileSystem.layer),
     ),
@@ -29,7 +29,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     const starting = runtime.runPromise(
-      ChildSession.use((session) => session.start).pipe(
+      PiSubagentSession.use((session) => session.start).pipe(
         Effect.tapError((error) =>
           Effect.logWarning("Subagent link failed", error).pipe(
             Effect.annotateLogs({ subagentId }),
@@ -44,7 +44,7 @@ export default function extension(pi: ExtensionAPI): void {
       .then(() =>
         runtime.runPromise(
           Effect.raceFirst(
-            ChildSession.use((session) =>
+            PiSubagentSession.use((session) =>
               session.inbox.pipe(
                 Stream.runForEach((datagram) =>
                   datagram.kind === "message"
@@ -99,7 +99,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   pi.on("agent_settled", (_event, ctx) =>
     runtime.runPromise(
-      ChildSession.use((session) => session.sendSettled(ctx.sessionManager)).pipe(
+      PiSubagentSession.use((session) => session.sendSettled(ctx.sessionManager)).pipe(
         Effect.andThen(Queue.offer(ready, undefined)),
         Effect.asVoid,
       ),

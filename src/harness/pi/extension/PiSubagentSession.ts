@@ -1,11 +1,11 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Context, Effect, Layer, Option, Ref, Scope, Semaphore, Stream } from "effect";
 
-import { SubagentLinkTransport } from "../../host/link/Transport.ts";
-import * as Protocol from "../../host/Protocol.ts";
-import type { SubagentId } from "../../subagent/SubagentId.ts";
+import { SubagentLinkTransport } from "../../../host/link/Transport.ts";
+import * as Protocol from "../../../host/Protocol.ts";
+import type { SubagentId } from "../../../subagent/SubagentId.ts";
 
-const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId) {
+const make = Effect.fn("PiSubagentSession.make")(function* (subagentId: SubagentId) {
   const scope = yield* Scope.Scope;
   const transport = yield* SubagentLinkTransport;
   const session = yield* Ref.make(Option.none<Protocol.SubagentChildSession>());
@@ -28,9 +28,9 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
         }),
       ),
     )
-    .pipe(Effect.withSpan("PiChildSession.start"));
+    .pipe(Effect.withSpan("PiSubagentSession.start"));
 
-  const sendSettled = Effect.fn("PiChildSession.sendSettled")(function* (
+  const sendSettled = Effect.fn("PiSubagentSession.sendSettled")(function* (
     sessionManager: ExtensionContext["sessionManager"],
   ) {
     const current = yield* Ref.get(session);
@@ -90,10 +90,10 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
   };
 });
 
-export class ChildSession extends Context.Service<ChildSession>()(
-  "@smith/harness/pi/ChildSession",
+export class PiSubagentSession extends Context.Service<PiSubagentSession>()(
+  "@smith/harness/pi/extension/PiSubagentSession",
   { make },
 ) {
   static readonly layer = (subagentId: SubagentId) =>
-    Layer.effect(ChildSession, ChildSession.make(subagentId));
+    Layer.effect(PiSubagentSession, PiSubagentSession.make(subagentId));
 }

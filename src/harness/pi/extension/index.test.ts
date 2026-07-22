@@ -5,11 +5,11 @@ import { discoverAndLoadExtensions, SessionManager } from "@earendil-works/pi-co
 import { expect, it, vi } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
 
-import * as Protocol from "../host/Protocol.ts";
-import { LinkDisconnectedError, LinkProtocolError } from "../host/link/Link.ts";
-import { SubagentLinkTransport } from "../host/link/Transport.ts";
-import * as UnixSocketTransport from "../host/link/unix/UnixSocketTransport.ts";
-import { decodeSubagentId } from "../subagent/SubagentId.ts";
+import * as Protocol from "../../../host/Protocol.ts";
+import { LinkDisconnectedError, LinkProtocolError } from "../../../host/link/Link.ts";
+import { SubagentLinkTransport } from "../../../host/link/Transport.ts";
+import * as UnixSocketTransport from "../../../host/link/unix/UnixSocketTransport.ts";
+import { decodeSubagentId } from "../../../subagent/SubagentId.ts";
 
 const encodeJson = Schema.encodeEffect(Schema.UnknownFromJsonString);
 
@@ -22,7 +22,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -106,7 +106,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -226,7 +226,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId).pipe(Scope.provide(listenerScope));
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -274,7 +274,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -323,7 +323,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -387,7 +387,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -483,7 +483,7 @@ it.describe("Pi subagent extension", () => {
 
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -549,7 +549,7 @@ it.describe("Pi subagent extension", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_extension-connect-failure");
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -620,7 +620,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId).pipe(Scope.provide(listenerScope));
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -684,7 +684,7 @@ it.describe("Pi subagent extension", () => {
       const listener = yield* Protocol.listen(subagentId);
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -765,7 +765,7 @@ it.describe("Pi subagent extension", () => {
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -782,7 +782,7 @@ it.describe("Pi subagent extension", () => {
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),
@@ -799,7 +799,7 @@ it.describe("Pi subagent extension", () => {
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
         discoverAndLoadExtensions(
-          [fileURLToPath(new URL("./pi-subagent.ts", import.meta.url))],
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
           "/tmp/smith-extension-test",
           "/tmp/smith-extension-test",
         ),

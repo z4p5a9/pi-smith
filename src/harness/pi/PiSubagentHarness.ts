@@ -25,7 +25,7 @@ const makeCommand = Effect.fn("PiSubagentHarness.makeCommand")(function* (
     args: [
       piEntrypoint,
       "--extension",
-      fileURLToPath(new URL("../../extension/pi-subagent.ts", import.meta.url)),
+      fileURLToPath(new URL("./extension/index.ts", import.meta.url)),
       "--name",
       spec.title,
       spec.prompt,

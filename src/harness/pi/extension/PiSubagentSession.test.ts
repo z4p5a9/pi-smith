@@ -3,11 +3,11 @@ import { expect, it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Stream } from "effect";
 import * as Socket from "effect/unstable/socket/Socket";
 
-import { SubagentLinkConnectError, SubagentLinkTransport } from "../../host/link/Transport.ts";
-import * as UnixSocketTransport from "../../host/link/unix/UnixSocketTransport.ts";
-import * as Protocol from "../../host/Protocol.ts";
-import { decodeSubagentId } from "../../subagent/SubagentId.ts";
-import { ChildSession } from "./ChildSession.ts";
+import { SubagentLinkConnectError, SubagentLinkTransport } from "../../../host/link/Transport.ts";
+import * as UnixSocketTransport from "../../../host/link/unix/UnixSocketTransport.ts";
+import * as Protocol from "../../../host/Protocol.ts";
+import { decodeSubagentId } from "../../../subagent/SubagentId.ts";
+import { PiSubagentSession } from "./PiSubagentSession.ts";
 
 it.effect("constructs without connecting the link", () =>
   Effect.gen(function* () {
@@ -15,7 +15,7 @@ it.effect("constructs without connecting the link", () =>
 
     yield* Effect.void.pipe(
       Effect.provide(
-        ChildSession.layer(subagentId).pipe(
+        PiSubagentSession.layer(subagentId).pipe(
           Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -34,7 +34,7 @@ it.effect("starts one connection across concurrent calls", () =>
     const listener = yield* Protocol.listen(subagentId);
 
     yield* Effect.gen(function* () {
-      const session = yield* ChildSession;
+      const session = yield* PiSubagentSession;
       const first = yield* session.start.pipe(Effect.forkChild({ startImmediately: true }));
 
       yield* Deferred.await(connectStarted);
@@ -51,7 +51,7 @@ it.effect("starts one connection across concurrent calls", () =>
       expect(connectCount).toBe(1);
     }).pipe(
       Effect.provide(
-        ChildSession.layer(subagentId).pipe(
+        PiSubagentSession.layer(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,
@@ -84,7 +84,7 @@ it.effect("retries start after connection failure", () =>
     const listener = yield* Protocol.listen(subagentId);
 
     yield* Effect.gen(function* () {
-      const session = yield* ChildSession;
+      const session = yield* PiSubagentSession;
       const error = yield* session.start.pipe(Effect.flip);
 
       expect(error).toEqual(
@@ -102,7 +102,7 @@ it.effect("retries start after connection failure", () =>
       expect(connectCount).toBe(2);
     }).pipe(
       Effect.provide(
-        ChildSession.layer(subagentId).pipe(
+        PiSubagentSession.layer(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,
@@ -143,7 +143,7 @@ it.effect("publishes the session when start is interrupted after root acceptance
     const listener = yield* Protocol.listen(subagentId);
 
     yield* Effect.gen(function* () {
-      const session = yield* ChildSession;
+      const session = yield* PiSubagentSession;
       const starting = yield* session.start.pipe(Effect.forkChild({ startImmediately: true }));
       const root = yield* listener.accept;
 
@@ -177,7 +177,7 @@ it.effect("publishes the session when start is interrupted after root acceptance
       expect(connectCount).toBe(1);
     }).pipe(
       Effect.provide(
-        ChildSession.layer(subagentId).pipe(
+        PiSubagentSession.layer(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,
