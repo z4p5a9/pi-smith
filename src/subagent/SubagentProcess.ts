@@ -4,21 +4,11 @@ import { SubagentHarness } from "../harness/Harness.ts";
 import { SubagentHost, type SubagentHostSession } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint, type SubagentRecord } from "./SubagentCheckpoint.ts";
-import type { SubagentEvent } from "./SubagentEvent.ts";
+import type { SubagentEvent, SubagentProcessEvent } from "./SubagentEvent.ts";
 import type { SubagentId } from "./SubagentId.ts";
 import { generateSubagentMessageId, type SubagentMessageId } from "./SubagentMessageId.ts";
 import type { SubagentProcessResult } from "./SubagentProcessResult.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
-
-export type SubagentProcessEvent =
-  | SubagentEvent
-  | {
-      readonly kind: "message-rejected";
-      readonly messageId: SubagentMessageId;
-      readonly reason: "frame-too-large";
-      readonly actualBytes: number;
-      readonly maxBytes: number;
-    };
 
 interface SubagentMessage {
   readonly messageId: SubagentMessageId;

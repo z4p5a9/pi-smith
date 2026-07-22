@@ -1,12 +1,9 @@
 import { Context, Deferred, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
+import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
-import {
-  makeSubagentProcess,
-  type SubagentProcess,
-  type SubagentProcessEvent,
-} from "./SubagentProcess.ts";
+import { makeSubagentProcess, type SubagentProcess } from "./SubagentProcess.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export class SubagentUnknownError extends Schema.TaggedErrorClass<SubagentUnknownError>()(
@@ -31,11 +28,8 @@ interface Admission {
 
 const make = Effect.fn("SubagentCoordinator.make")(function* () {
   const checkpoint = yield* SubagentCheckpoint;
+  const eventOutbox = yield* SubagentEventOutbox;
   const admissions = yield* Queue.unbounded<Admission>();
-  const events = yield* Queue.unbounded<{
-    readonly subagentId: SubagentId;
-    readonly event: SubagentProcessEvent;
-  }>();
   const children = yield* FiberMap.make<SubagentId>();
   const registry = new Map<SubagentId, SubagentProcess>();
 
@@ -45,7 +39,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
       const process = yield* makeSubagentProcess(admission.subagentId, admission.spec);
       const aggregate = process.events.pipe(
         Stream.runForEach((event) =>
-          Queue.offer(events, { subagentId: admission.subagentId, event }),
+          eventOutbox.publish({ subagentId: admission.subagentId, event }),
         ),
       );
 
@@ -68,10 +62,7 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
   ).pipe(Effect.forkScoped({ startImmediately: true }));
 
   yield* Effect.addFinalizer(() =>
-    Queue.shutdown(admissions).pipe(
-      Effect.andThen(FiberMap.clear(children)),
-      Effect.andThen(Queue.shutdown(events)),
-    ),
+    Queue.shutdown(admissions).pipe(Effect.andThen(FiberMap.clear(children))),
   );
 
   const create = Effect.fn("SubagentCoordinator.create")(function* (spec: SubagentSpec) {
@@ -149,7 +140,6 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     send,
     kill,
     status,
-    events: Stream.fromQueue(events),
   };
 });
 

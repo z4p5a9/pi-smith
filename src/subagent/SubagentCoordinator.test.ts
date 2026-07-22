@@ -27,6 +27,8 @@ import {
   SubagentInactiveError,
   SubagentUnknownError,
 } from "./SubagentCoordinator.ts";
+import type { SubagentEventEnvelope } from "./SubagentEvent.ts";
+import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { decodeSubagentId, type SubagentId } from "./SubagentId.ts";
 
 it.describe("SubagentCoordinator", () => {
@@ -34,6 +36,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
 
       yield* testHost.stub([null]);
@@ -53,7 +56,7 @@ it.describe("SubagentCoordinator", () => {
       yield* child.send({ kind: "message", content: "Task complete." });
 
       expect(
-        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
       ).toEqual({
         subagentId,
         event: { kind: "message", content: "Task complete." },
@@ -85,6 +88,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -107,6 +111,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
       const errorSubagentId = yield* decodeSubagentId("sa_12345678_unavailable");
 
@@ -125,7 +130,7 @@ it.describe("SubagentCoordinator", () => {
         mode: "ephemeral",
       });
 
-      const { event, subagentId } = yield* coordinator.events.pipe(
+      const { event, subagentId } = yield* eventOutbox.events.pipe(
         Stream.runHead,
         Effect.flatMap(Effect.fromOption),
       );
@@ -140,6 +145,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -162,6 +168,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
 
       yield* testHost.stub([null]);
@@ -180,7 +187,7 @@ it.describe("SubagentCoordinator", () => {
       yield* child.send({ kind: "failure", reason: "Model request failed" });
 
       expect(
-        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
       ).toEqual({
         subagentId,
         event: { kind: "failure", reason: "Model request failed" },
@@ -194,6 +201,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -216,6 +224,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
       const parentScope = yield* Scope.Scope;
       const childScope = yield* Scope.fork(parentScope);
@@ -237,7 +246,7 @@ it.describe("SubagentCoordinator", () => {
       );
       yield* Scope.close(childScope, Exit.void);
 
-      const notification = yield* coordinator.events.pipe(
+      const notification = yield* eventOutbox.events.pipe(
         Stream.runHead,
         Effect.flatMap(Effect.fromOption),
       );
@@ -250,6 +259,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -272,6 +282,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
 
       yield* testHost.stub(Array.from({ length: 11 }, () => null));
@@ -303,7 +314,7 @@ it.describe("SubagentCoordinator", () => {
       const child = yield* Protocol.connect(firstStartedSubagentId);
 
       yield* child.send({ kind: "message", content: "Done." });
-      yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
       expect(yield* testHost.takeStart).toBe(eleventhSubagentId);
       expect((yield* checkpoint.get(twelfthSubagentId)).status).toBe("queued");
@@ -312,6 +323,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -366,6 +378,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -436,6 +449,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -485,6 +499,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -503,9 +518,150 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
+  it.effect("retains an event published before kill", () =>
+    Effect.gen(function* () {
+      const eventOutbox = yield* SubagentEventOutbox.make();
+      const published = yield* Deferred.make<SubagentEventEnvelope>();
+      const observedEventOutbox = SubagentEventOutbox.of({
+        ...eventOutbox,
+        publish: Effect.fn("ObservedSubagentEventOutbox.publish")(function* (
+          envelope: SubagentEventEnvelope,
+        ) {
+          yield* eventOutbox.publish(envelope);
+          yield* Deferred.succeed(published, envelope);
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const checkpoint = yield* SubagentCheckpoint;
+        const coordinator = yield* SubagentCoordinator;
+        const testHost = yield* TestHost;
+
+        yield* testHost.stub([null]);
+
+        const subagentId = yield* coordinator.create({
+          title: "Published assistant",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+          mode: "persistent",
+        });
+
+        expect(yield* testHost.takeStart).toBe(subagentId);
+
+        const child = yield* Protocol.connect(subagentId);
+
+        yield* child.send({ kind: "message", content: "Published." });
+        yield* Deferred.await(published);
+        yield* coordinator.kill(subagentId);
+
+        expect(
+          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+        ).toEqual({
+          subagentId,
+          event: { kind: "message", content: "Published." },
+        });
+        expect((yield* checkpoint.get(subagentId)).status).toBe("killed");
+        yield* testHost.verify;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(Layer.succeed(SubagentEventOutbox, observedEventOutbox)),
+            Layer.provideMerge(SubagentCheckpoint.layer),
+            Layer.provideMerge(TestHost.layer),
+            Layer.provide(
+              Layer.succeed(
+                SubagentHarness,
+                SubagentHarness.of({
+                  makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+                }),
+              ),
+            ),
+            Layer.provide(SubagentCapacity.layer(10)),
+            Layer.provideMerge(UnixSocketTransport.layer),
+            Layer.provide(NodeFileSystem.layer),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("drops an event whose publication is interrupted by kill", () =>
+    Effect.gen(function* () {
+      const eventOutbox = yield* SubagentEventOutbox.make();
+      const publishing = yield* Deferred.make<SubagentEventEnvelope>();
+      const blockedEventOutbox = SubagentEventOutbox.of({
+        ...eventOutbox,
+        publish: Effect.fn("BlockedSubagentEventOutbox.publish")(function* (
+          envelope: SubagentEventEnvelope,
+        ) {
+          yield* Deferred.succeed(publishing, envelope);
+          return yield* Effect.never;
+        }),
+      });
+
+      yield* Effect.gen(function* () {
+        const checkpoint = yield* SubagentCheckpoint;
+        const coordinator = yield* SubagentCoordinator;
+        const testHost = yield* TestHost;
+
+        yield* testHost.stub([null]);
+
+        const subagentId = yield* coordinator.create({
+          title: "Interrupted publication",
+          prompt: "Complete the task.",
+          cwd: "/worktree",
+          mode: "persistent",
+        });
+
+        expect(yield* testHost.takeStart).toBe(subagentId);
+
+        const child = yield* Protocol.connect(subagentId);
+
+        yield* child.send({ kind: "message", content: "In flight." });
+        yield* Deferred.await(publishing);
+        yield* coordinator.kill(subagentId);
+
+        const event = yield* eventOutbox.events.pipe(
+          Stream.runHead,
+          Effect.flatMap(Effect.fromOption),
+          Effect.timeoutOption("1 millis"),
+          Effect.forkChild({ startImmediately: true }),
+        );
+
+        yield* TestClock.adjust("1 millis");
+
+        expect(Option.isNone(yield* Fiber.join(event))).toBe(true);
+        expect((yield* checkpoint.get(subagentId)).status).toBe("killed");
+        yield* testHost.verify;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(Layer.succeed(SubagentEventOutbox, blockedEventOutbox)),
+            Layer.provideMerge(SubagentCheckpoint.layer),
+            Layer.provideMerge(TestHost.layer),
+            Layer.provide(
+              Layer.succeed(
+                SubagentHarness,
+                SubagentHarness.of({
+                  makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+                }),
+              ),
+            ),
+            Layer.provide(SubagentCapacity.layer(10)),
+            Layer.provideMerge(UnixSocketTransport.layer),
+            Layer.provide(NodeFileSystem.layer),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("publishes one event when delivery races with disconnect", () =>
     Effect.gen(function* () {
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const testHost = yield* TestHost;
       const parentScope = yield* Scope.Scope;
       const childScope = yield* Scope.fork(parentScope);
@@ -529,11 +685,11 @@ it.describe("SubagentCoordinator", () => {
       yield* Scope.close(childScope, Exit.void);
 
       expect(
-        (yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)))
+        (yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)))
           .subagentId,
       ).toBe(subagentId);
 
-      const second = yield* coordinator.events.pipe(
+      const second = yield* eventOutbox.events.pipe(
         Stream.runHead,
         Effect.flatMap(Effect.fromOption),
         Effect.timeoutOption("1 millis"),
@@ -548,6 +704,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -584,6 +741,7 @@ it.describe("SubagentCoordinator", () => {
 
       yield* Effect.gen(function* () {
         const coordinator = yield* SubagentCoordinator;
+        const eventOutbox = yield* SubagentEventOutbox;
         const capacity = yield* SubagentCapacity;
         const testHost = yield* TestHost;
 
@@ -603,7 +761,7 @@ it.describe("SubagentCoordinator", () => {
         yield* child.send({ kind: "message", content: "Ready." });
 
         expect(
-          yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
         ).toEqual({
           subagentId,
           event: { kind: "message", content: "Ready." },
@@ -645,7 +803,7 @@ it.describe("SubagentCoordinator", () => {
           ).byteLength;
 
         expect(
-          yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
         ).toEqual({
           subagentId,
           event: {
@@ -678,7 +836,7 @@ it.describe("SubagentCoordinator", () => {
         yield* child.send({ kind: "message", content: "Reviewed." });
 
         expect(
-          yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
         ).toEqual({
           subagentId,
           event: { kind: "message", content: "Reviewed." },
@@ -708,6 +866,7 @@ it.describe("SubagentCoordinator", () => {
         Effect.scoped,
         Effect.provide(
           SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
@@ -731,6 +890,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
       const capacity = yield* SubagentCapacity;
       const testHost = yield* TestHost;
 
@@ -748,7 +908,7 @@ it.describe("SubagentCoordinator", () => {
       const child = yield* Protocol.connect(subagentId);
 
       yield* child.send({ kind: "message", content: "Ready." });
-      yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+      yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "idle"),
         Stream.runHead,
@@ -782,6 +942,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -864,6 +1025,7 @@ it.describe("SubagentCoordinator", () => {
         Effect.scoped,
         Effect.provide(
           SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, controlledCheckpoint)),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
@@ -894,6 +1056,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -923,6 +1086,7 @@ it.describe("SubagentCoordinator", () => {
       Effect.scoped,
       Effect.provide(
         SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
@@ -959,6 +1123,7 @@ it.describe("SubagentCoordinator", () => {
 
       yield* Effect.gen(function* () {
         const coordinator = yield* SubagentCoordinator;
+        const eventOutbox = yield* SubagentEventOutbox;
         const testHost = yield* TestHost;
 
         yield* testHost.stub([null, null]);
@@ -975,7 +1140,7 @@ it.describe("SubagentCoordinator", () => {
         const firstChild = yield* Protocol.connect(firstSubagentId);
 
         yield* firstChild.send({ kind: "message", content: "First task complete." });
-        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
         expect((yield* checkpoint.get(firstSubagentId)).status).toBe("exited");
         observeRegistryMiss = true;
@@ -1010,7 +1175,7 @@ it.describe("SubagentCoordinator", () => {
         const secondChild = yield* Protocol.connect(secondSubagentId);
 
         yield* secondChild.send({ kind: "message", content: "Second task complete." });
-        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
         expect((yield* checkpoint.get(secondSubagentId)).status).toBe("exited");
         observeRegistryMiss = true;
@@ -1034,6 +1199,7 @@ it.describe("SubagentCoordinator", () => {
         Effect.scoped,
         Effect.provide(
           SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
@@ -1071,6 +1237,7 @@ it.describe("SubagentCoordinator", () => {
 
       yield* Effect.gen(function* () {
         const coordinator = yield* SubagentCoordinator;
+        const eventOutbox = yield* SubagentEventOutbox;
         const testHost = yield* TestHost;
 
         yield* testHost.stub([null]);
@@ -1087,7 +1254,7 @@ it.describe("SubagentCoordinator", () => {
         const child = yield* Protocol.connect(subagentId);
 
         yield* child.send({ kind: "message", content: "Task complete." });
-        yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
         expect((yield* checkpoint.get(subagentId)).status).toBe("exited");
         yield* Deferred.succeed(observeRegistryMiss, undefined);
@@ -1109,6 +1276,7 @@ it.describe("SubagentCoordinator", () => {
         Effect.scoped,
         Effect.provide(
           SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
@@ -1147,6 +1315,7 @@ it.describe("SubagentCoordinator", () => {
 
       yield* Effect.gen(function* () {
         const coordinator = yield* SubagentCoordinator;
+        const eventOutbox = yield* SubagentEventOutbox;
         const testHost = yield* TestHost;
 
         yield* testHost.stub([
@@ -1174,7 +1343,7 @@ it.describe("SubagentCoordinator", () => {
           latestEvent: { kind: "failure", reason: "Host unavailable" },
         });
         expect(
-          yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
         ).toEqual({
           subagentId,
           event: { kind: "failure", reason: "Host unavailable" },
@@ -1184,6 +1353,7 @@ it.describe("SubagentCoordinator", () => {
         Effect.scoped,
         Effect.provide(
           SubagentCoordinator.layer.pipe(
+            Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
@@ -1222,7 +1392,11 @@ it.describe("SubagentCoordinator", () => {
 
           expect(yield* testHost.takeStart).toBe(admittedSubagentId);
           return admittedSubagentId;
-        }).pipe(Effect.provide(SubagentCoordinator.layer)),
+        }).pipe(
+          Effect.provide(
+            SubagentCoordinator.layer.pipe(Layer.provideMerge(SubagentEventOutbox.layer)),
+          ),
+        ),
       );
 
       expect((yield* checkpoint.get(subagentId)).status).toBe("starting");
@@ -1252,6 +1426,7 @@ it.describe("SubagentCoordinator", () => {
   it.effect("releases live children when its ManagedRuntime is disposed", () => {
     const runtime = ManagedRuntime.make(
       SubagentCoordinator.layer.pipe(
+        Layer.provideMerge(SubagentEventOutbox.layer),
         Layer.provideMerge(SubagentCheckpoint.layer),
         Layer.provideMerge(TestHost.layer),
         Layer.provide(
@@ -1270,7 +1445,7 @@ it.describe("SubagentCoordinator", () => {
 
     return Effect.gen(function* () {
       runtime.runFork(
-        SubagentCoordinator.use((coordinator) => coordinator.events.pipe(Stream.runDrain)),
+        SubagentEventOutbox.use((eventOutbox) => eventOutbox.events.pipe(Stream.runDrain)),
       );
 
       const parentScope = yield* Scope.Scope;

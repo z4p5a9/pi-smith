@@ -1,5 +1,5 @@
 import { NodeChildProcessSpawner, NodeFileSystem, NodePath } from "@effect/platform-node";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   Config,
   ConfigProvider,
@@ -18,9 +18,83 @@ import * as UnixSocketTransport from "./host/link/unix/UnixSocketTransport.ts";
 import { SubagentCapacity } from "./subagent/SubagentCapacity.ts";
 import { SubagentCheckpoint, SubagentRecord } from "./subagent/SubagentCheckpoint.ts";
 import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
+import { SubagentEventOutbox } from "./subagent/SubagentEventOutbox.ts";
 import { decodeSubagentId } from "./subagent/SubagentId.ts";
 
 const encodeSubagentRecord = Schema.encodeEffect(Schema.fromJsonString(SubagentRecord));
+
+export const deliverSubagentEvents = Effect.fn("deliverSubagentEvents")(function* (
+  pi: Pick<ExtensionAPI, "sendMessage">,
+  ctx: {
+    readonly hasUI: boolean;
+    readonly ui: Pick<ExtensionContext["ui"], "notify">;
+  },
+) {
+  const eventOutbox = yield* SubagentEventOutbox;
+
+  yield* eventOutbox.events.pipe(
+    Stream.runForEach(({ event, subagentId }) =>
+      Effect.try(() => {
+        if (event.kind === "message-rejected") {
+          pi.sendMessage(
+            {
+              customType: "smith-subagent",
+              content:
+                `Message ${event.messageId} to subagent ${subagentId} was rejected before ` +
+                `delivery: ${event.actualBytes} bytes exceeds the ${event.maxBytes}-byte limit.`,
+              display: false,
+              details: { subagentId, event },
+            },
+            {
+              deliverAs: "followUp",
+              triggerTurn: true,
+            },
+          );
+
+          if (ctx.hasUI) {
+            ctx.ui.notify(
+              `Message ${event.messageId} to subagent ${subagentId} was rejected`,
+              "error",
+            );
+          }
+
+          return;
+        }
+
+        pi.sendMessage(
+          {
+            customType: "smith-subagent",
+            content:
+              event.kind === "message"
+                ? `Subagent ${subagentId} reported:\n\n${event.content}`
+                : `Subagent ${subagentId} failed:\n\n${event.reason}`,
+            display: false,
+            details: { subagentId, event },
+          },
+          {
+            deliverAs: "followUp",
+            triggerTurn: true,
+          },
+        );
+
+        if (ctx.hasUI) {
+          ctx.ui.notify(
+            event.kind === "message"
+              ? `Subagent ${subagentId} reported`
+              : `Subagent ${subagentId} failed`,
+            event.kind === "message" ? "info" : "error",
+          );
+        }
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logError("Failed to deliver subagent event to root Pi", error).pipe(
+            Effect.annotateLogs({ subagentId }),
+          ),
+        ),
+      ),
+    ),
+  );
+});
 
 export default function extension(pi: ExtensionAPI): void {
   const childMarker = Effect.runSync(
@@ -50,6 +124,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   const runtime = ManagedRuntime.make(
     SubagentCoordinator.layer.pipe(
+      Layer.provideMerge(SubagentEventOutbox.layer),
       Layer.provide(SubagentCapacity.layer(10)),
       Layer.provide(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
@@ -62,74 +137,7 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   pi.on("session_start", (_event, ctx) => {
-    runtime.runFork(
-      Effect.gen(function* () {
-        const coordinator = yield* SubagentCoordinator;
-
-        yield* coordinator.events.pipe(
-          Stream.runForEach(({ event, subagentId }) =>
-            Effect.try(() => {
-              if (event.kind === "message-rejected") {
-                pi.sendMessage(
-                  {
-                    customType: "smith-subagent",
-                    content:
-                      `Message ${event.messageId} to subagent ${subagentId} was rejected before ` +
-                      `delivery: ${event.actualBytes} bytes exceeds the ${event.maxBytes}-byte limit.`,
-                    display: false,
-                    details: { subagentId, event },
-                  },
-                  {
-                    deliverAs: "followUp",
-                    triggerTurn: true,
-                  },
-                );
-
-                if (ctx.hasUI) {
-                  ctx.ui.notify(
-                    `Message ${event.messageId} to subagent ${subagentId} was rejected`,
-                    "error",
-                  );
-                }
-
-                return;
-              }
-
-              pi.sendMessage(
-                {
-                  customType: "smith-subagent",
-                  content:
-                    event.kind === "message"
-                      ? `Subagent ${subagentId} reported:\n\n${event.content}`
-                      : `Subagent ${subagentId} failed:\n\n${event.reason}`,
-                  display: false,
-                  details: { subagentId, event },
-                },
-                {
-                  deliverAs: "followUp",
-                  triggerTurn: true,
-                },
-              );
-
-              if (ctx.hasUI) {
-                ctx.ui.notify(
-                  event.kind === "message"
-                    ? `Subagent ${subagentId} reported`
-                    : `Subagent ${subagentId} failed`,
-                  event.kind === "message" ? "info" : "error",
-                );
-              }
-            }).pipe(
-              Effect.catch((error) =>
-                Effect.logError("Failed to deliver subagent event to root Pi", error).pipe(
-                  Effect.annotateLogs({ subagentId }),
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
-    );
+    runtime.runFork(deliverSubagentEvents(pi, ctx));
   });
 
   pi.on("session_shutdown", () => {
