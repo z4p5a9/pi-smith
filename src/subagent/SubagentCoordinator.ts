@@ -1,9 +1,21 @@
-import { Context, Deferred, Effect, FiberMap, Layer, Queue, Schema, Stream } from "effect";
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  FiberMap,
+  Layer,
+  Queue,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
 import { makeSubagentProcess, type SubagentProcess } from "./SubagentProcess.ts";
+import { SubagentRegistry } from "./SubagentRegistry.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 export class SubagentUnknownError extends Schema.TaggedErrorClass<SubagentUnknownError>()(
@@ -29,9 +41,10 @@ interface Admission {
 const make = Effect.fn("SubagentCoordinator.make")(function* () {
   const checkpoint = yield* SubagentCheckpoint;
   const eventOutbox = yield* SubagentEventOutbox;
+  const registry = yield* SubagentRegistry;
   const admissions = yield* Queue.unbounded<Admission>();
   const children = yield* FiberMap.make<SubagentId>();
-  const registry = new Map<SubagentId, SubagentProcess>();
+  const processes = new Map<SubagentId, SubagentProcess>();
 
   yield* Effect.forever(
     Effect.gen(function* () {
@@ -42,17 +55,27 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
           eventOutbox.publish({ subagentId: admission.subagentId, event }),
         ),
       );
+      const runtimeScope = yield* Scope.make();
 
       yield* Effect.uninterruptible(
         Effect.gen(function* () {
-          registry.set(admission.subagentId, process);
+          yield* Effect.acquireRelease(registry.register(admission.subagentId, process.ref), () =>
+            registry.unregister(admission.subagentId, process.ref),
+          ).pipe(Scope.provide(runtimeScope));
+          processes.set(admission.subagentId, process);
           yield* FiberMap.run(
             children,
             admission.subagentId,
             Effect.all([process.run, aggregate], {
               concurrency: "unbounded",
               discard: true,
-            }).pipe(Effect.ensuring(Effect.sync(() => registry.delete(admission.subagentId)))),
+            }).pipe(
+              Effect.ensuring(
+                Scope.close(runtimeScope, Exit.void).pipe(
+                  Effect.andThen(Effect.sync(() => processes.delete(admission.subagentId))),
+                ),
+              ),
+            ),
             { startImmediately: true },
           );
           yield* Deferred.succeed(admission.ready, undefined);
@@ -76,33 +99,10 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     return subagentId;
   });
 
-  const send = Effect.fn("SubagentCoordinator.send")(function* (
-    subagentId: SubagentId,
-    content: string,
-  ) {
-    const process = registry.get(subagentId);
-
-    if (process === undefined) {
-      if (!(yield* checkpoint.has(subagentId))) {
-        return yield* SubagentUnknownError.make({ subagentId });
-      }
-
-      return yield* SubagentInactiveError.make({ subagentId });
-    }
-
-    const messageId = yield* process.send(content);
-
-    if (messageId === undefined) {
-      return yield* SubagentInactiveError.make({ subagentId });
-    }
-
-    return messageId;
-  });
-
   const kill = Effect.fn("SubagentCoordinator.kill")(function* (subagentId: SubagentId) {
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
-        const process = registry.get(subagentId);
+        const process = processes.get(subagentId);
 
         if (process === undefined) {
           if (!(yield* checkpoint.has(subagentId))) {
@@ -129,7 +129,6 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
 
   return {
     create,
-    send,
     kill,
   };
 });
@@ -138,5 +137,7 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
   "@smith/subagent/SubagentCoordinator",
   { make },
 ) {
-  static readonly layer = Layer.effect(SubagentCoordinator, SubagentCoordinator.make());
+  static readonly layer = Layer.effect(SubagentCoordinator, SubagentCoordinator.make()).pipe(
+    Layer.provideMerge(SubagentRegistry.layer),
+  );
 }

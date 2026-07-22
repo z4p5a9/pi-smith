@@ -35,7 +35,7 @@ it.describe("SubagentProcess", () => {
         cwd: "/worktree",
         mode: "ephemeral",
       });
-      expect(yield* process.send("Ignored.")).toBeUndefined();
+      expect(yield* process.ref.send("Ignored.")).toBeUndefined();
 
       const running = yield* process.run.pipe(Effect.forkChild({ startImmediately: true }));
 
@@ -113,7 +113,7 @@ it.describe("SubagentProcess", () => {
         Stream.runHead,
       );
 
-      yield* process.send("Review the diff.");
+      yield* process.ref.send("Review the diff.");
 
       expect(yield* child.inbox.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption))).toEqual({
         kind: "message",
@@ -198,7 +198,7 @@ it.describe("SubagentProcess", () => {
         yield* Queue.offer(childEvents, { kind: "message", content: "Ready." });
         yield* Deferred.await(initialAckCompleted);
 
-        yield* process.send("Initial command.");
+        yield* process.ref.send("Initial command.");
         expect(yield* Queue.take(sent)).toBe("Initial command.");
         expect(yield* Ref.get(receiveCount)).toBe(1);
 
@@ -216,10 +216,10 @@ it.describe("SubagentProcess", () => {
           { kind: "message", content: "Initial result." },
         ]);
 
-        yield* process.send("First command.");
+        yield* process.ref.send("First command.");
         expect(yield* Queue.take(sent)).toBe("First command.");
 
-        yield* process.send("Second command.");
+        yield* process.ref.send("Second command.");
         expect(yield* Queue.take(sent)).toBe("Second command.");
         yield* Deferred.await(secondSendStarted);
 
@@ -367,6 +367,7 @@ it.describe("SubagentProcess", () => {
       expect((yield* checkpoint.get(subagentId)).status).toBe("failed");
 
       yield* Fiber.join(running);
+      expect(yield* process.ref.send("Too late.")).toBeUndefined();
       yield* testHost.verify;
     }).pipe(
       Effect.scoped,

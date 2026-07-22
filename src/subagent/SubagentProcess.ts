@@ -8,6 +8,7 @@ import type { SubagentEvent, SubagentProcessEvent } from "./SubagentEvent.ts";
 import type { SubagentId } from "./SubagentId.ts";
 import { generateSubagentMessageId, type SubagentMessageId } from "./SubagentMessageId.ts";
 import type { SubagentProcessResult } from "./SubagentProcessResult.ts";
+import type { SubagentRef } from "./SubagentRef.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
 interface SubagentMessage {
@@ -19,7 +20,7 @@ export interface SubagentProcess {
   readonly subagentId: SubagentId;
   readonly events: Stream.Stream<SubagentProcessEvent>;
   readonly await: Effect.Effect<SubagentProcessResult>;
-  readonly send: (content: string) => Effect.Effect<SubagentMessageId | undefined>;
+  readonly ref: SubagentRef;
   readonly run: Effect.Effect<void>;
 }
 
@@ -271,7 +272,7 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
     subagentId,
     events: Stream.fromQueue(events),
     await: Deferred.await(result),
-    send,
+    ref: { send },
     run,
   } satisfies SubagentProcess;
 });

@@ -30,6 +30,7 @@ import {
 import type { SubagentEventEnvelope } from "./SubagentEvent.ts";
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { decodeSubagentId, type SubagentId } from "./SubagentId.ts";
+import { SubagentRegistry } from "./SubagentRegistry.ts";
 
 it.describe("SubagentCoordinator", () => {
   it.effect("projects and retains one exited message before notification consumption", () =>
@@ -37,6 +38,7 @@ it.describe("SubagentCoordinator", () => {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
       const eventOutbox = yield* SubagentEventOutbox;
+      const registry = yield* SubagentRegistry;
       const testHost = yield* TestHost;
 
       yield* testHost.stub([null]);
@@ -48,6 +50,9 @@ it.describe("SubagentCoordinator", () => {
         mode: "ephemeral",
       });
 
+      const ref = yield* Effect.fromNullishOr(yield* registry.lookup(subagentId));
+
+      expect(yield* ref.send("Ignored.")).toBeUndefined();
       expect(yield* testHost.takeStart).toBe(subagentId);
       expect((yield* checkpoint.get(subagentId)).status).toBe("starting");
 
@@ -83,6 +88,13 @@ it.describe("SubagentCoordinator", () => {
           ),
         ),
       ).pipe(Effect.eventually);
+      yield* Effect.gen(function* () {
+        if ((yield* registry.lookup(subagentId)) !== undefined) {
+          return yield* Effect.fail("Subagent reference is still registered");
+        }
+
+        return yield* Effect.void;
+      }).pipe(Effect.eventually);
       yield* testHost.verify;
     }).pipe(
       Effect.scoped,
@@ -346,6 +358,7 @@ it.describe("SubagentCoordinator", () => {
     Effect.gen(function* () {
       const coordinator = yield* SubagentCoordinator;
       const capacity = yield* SubagentCapacity;
+      const registry = yield* SubagentRegistry;
       const testHost = yield* TestHost;
       const capacityAcquired = yield* Deferred.make<void>();
       const releaseCapacity = yield* Deferred.make<void>();
@@ -365,7 +378,8 @@ it.describe("SubagentCoordinator", () => {
         cwd: "/worktree",
         mode: "persistent",
       });
-      const messageId = yield* coordinator.send(subagentId, "Review the diff.");
+      const ref = yield* Effect.fromNullishOr(yield* registry.lookup(subagentId));
+      const messageId = yield* ref.send("Review the diff.");
 
       expect(messageId).toMatch(/^msg_[a-z0-9]{24}$/);
       expect(yield* testHost.calls).toEqual([]);
@@ -743,6 +757,7 @@ it.describe("SubagentCoordinator", () => {
         const coordinator = yield* SubagentCoordinator;
         const eventOutbox = yield* SubagentEventOutbox;
         const capacity = yield* SubagentCapacity;
+        const registry = yield* SubagentRegistry;
         const testHost = yield* TestHost;
 
         yield* testHost.stub([null]);
@@ -753,6 +768,7 @@ it.describe("SubagentCoordinator", () => {
           cwd: "/worktree",
           mode: "persistent",
         });
+        const ref = yield* Effect.fromNullishOr(yield* registry.lookup(subagentId));
 
         expect(yield* testHost.takeStart).toBe(subagentId);
 
@@ -785,7 +801,7 @@ it.describe("SubagentCoordinator", () => {
           Effect.forkChild({ startImmediately: true }),
         );
         const oversizedContent = "x".repeat(Link.maxLinkFrameBytes);
-        const oversizedMessageId = yield* coordinator.send(subagentId, oversizedContent);
+        const oversizedMessageId = yield* ref.send(oversizedContent);
 
         expect(oversizedMessageId).toMatch(/^msg_[a-z0-9]{24}$/);
         yield* checkpoint.changes(subagentId).pipe(
@@ -821,7 +837,7 @@ it.describe("SubagentCoordinator", () => {
         );
         expect(yield* testHost.active).toEqual([subagentId]);
 
-        const smallMessageId = yield* coordinator.send(subagentId, "Review the diff.");
+        const smallMessageId = yield* ref.send("Review the diff.");
 
         expect(smallMessageId).toMatch(/^msg_[a-z0-9]{24}$/);
         expect(smallMessageId).not.toBe(oversizedMessageId);
@@ -892,6 +908,7 @@ it.describe("SubagentCoordinator", () => {
       const coordinator = yield* SubagentCoordinator;
       const eventOutbox = yield* SubagentEventOutbox;
       const capacity = yield* SubagentCapacity;
+      const registry = yield* SubagentRegistry;
       const testHost = yield* TestHost;
 
       yield* testHost.stub([null]);
@@ -914,6 +931,7 @@ it.describe("SubagentCoordinator", () => {
         Stream.runHead,
       );
 
+      const ref = yield* Effect.fromNullishOr(yield* registry.lookup(subagentId));
       const capacityAcquired = yield* Deferred.make<void>();
       const releaseCapacity = yield* Deferred.make<void>();
       const capacityHolder = yield* capacity
@@ -925,7 +943,7 @@ it.describe("SubagentCoordinator", () => {
         .pipe(Effect.forkChild({ startImmediately: true }));
 
       yield* Deferred.await(capacityAcquired);
-      yield* coordinator.send(subagentId, "Review the diff.");
+      yield* ref.send("Review the diff.");
       yield* checkpoint.changes(subagentId).pipe(
         Stream.filter((record) => record.status === "queued"),
         Stream.runHead,
@@ -1045,36 +1063,6 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("fails sending to an unknown subagent", () =>
-    Effect.gen(function* () {
-      const coordinator = yield* SubagentCoordinator;
-      const subagentId = yield* decodeSubagentId("sa_12345678_unknown");
-      const error = yield* coordinator.send(subagentId, "Hello.").pipe(Effect.flip);
-
-      expect(error).toBeInstanceOf(SubagentUnknownError);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        SubagentCoordinator.layer.pipe(
-          Layer.provideMerge(SubagentEventOutbox.layer),
-          Layer.provideMerge(SubagentCheckpoint.layer),
-          Layer.provideMerge(TestHost.layer),
-          Layer.provide(
-            Layer.succeed(
-              SubagentHarness,
-              SubagentHarness.of({
-                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
-              }),
-            ),
-          ),
-          Layer.provide(SubagentCapacity.layer(10)),
-          Layer.provideMerge(UnixSocketTransport.layer),
-          Layer.provide(NodeFileSystem.layer),
-        ),
-      ),
-    ),
-  );
-
   it.effect("fails killing an unknown subagent", () =>
     Effect.gen(function* () {
       const coordinator = yield* SubagentCoordinator;
@@ -1105,118 +1093,61 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
-  it.effect("removes naturally exited subagents before late sends", () =>
+  it.effect("removes a naturally exited subagent from the registry", () =>
     Effect.gen(function* () {
-      let observeRegistryMiss = false;
-      let registryMiss = yield* Deferred.make<void>();
-      const checkpoint = yield* SubagentCheckpoint.make;
-      const observedCheckpoint = SubagentCheckpoint.of({
-        ...checkpoint,
-        has: Effect.fn("ObservedSubagentCheckpoint.has")(function* (subagentId: SubagentId) {
-          if (observeRegistryMiss) {
-            yield* Deferred.succeed(registryMiss, undefined);
-          }
+      const checkpoint = yield* SubagentCheckpoint;
+      const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
+      const registry = yield* SubagentRegistry;
+      const testHost = yield* TestHost;
 
-          return yield* checkpoint.has(subagentId);
-        }),
+      yield* testHost.stub([null]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
       });
 
+      expect(yield* registry.lookup(subagentId)).toBeDefined();
+      expect(yield* testHost.takeStart).toBe(subagentId);
+
+      const child = yield* Protocol.connect(subagentId);
+
+      yield* child.send({ kind: "message", content: "Task complete." });
+      yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
+
+      expect((yield* checkpoint.get(subagentId)).status).toBe("exited");
       yield* Effect.gen(function* () {
-        const coordinator = yield* SubagentCoordinator;
-        const eventOutbox = yield* SubagentEventOutbox;
-        const testHost = yield* TestHost;
+        if ((yield* registry.lookup(subagentId)) !== undefined) {
+          return yield* Effect.fail("Subagent reference is still registered");
+        }
 
-        yield* testHost.stub([null, null]);
-
-        const firstSubagentId = yield* coordinator.create({
-          title: "Review API client",
-          prompt: "Complete the task.",
-          cwd: "/worktree",
-          mode: "ephemeral",
-        });
-
-        expect(yield* testHost.takeStart).toBe(firstSubagentId);
-
-        const firstChild = yield* Protocol.connect(firstSubagentId);
-
-        yield* firstChild.send({ kind: "message", content: "First task complete." });
-        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
-
-        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("exited");
-        observeRegistryMiss = true;
-
-        const firstError = yield* Effect.gen(function* () {
-          const inactiveError = yield* coordinator
-            .send(firstSubagentId, "Too late.")
-            .pipe(Effect.flip);
-
-          if (!(yield* Deferred.isDone(registryMiss))) {
-            return yield* Effect.fail("Process is still retained");
-          }
-
-          return inactiveError;
-        }).pipe(Effect.eventually);
-
-        expect(firstError).toBeInstanceOf(SubagentInactiveError);
-        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("exited");
-
-        observeRegistryMiss = false;
-        registryMiss = yield* Deferred.make<void>();
-
-        const secondSubagentId = yield* coordinator.create({
-          title: "Review API server",
-          prompt: "Complete the task.",
-          cwd: "/worktree",
-          mode: "ephemeral",
-        });
-
-        expect(yield* testHost.takeStart).toBe(secondSubagentId);
-
-        const secondChild = yield* Protocol.connect(secondSubagentId);
-
-        yield* secondChild.send({ kind: "message", content: "Second task complete." });
-        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
-
-        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("exited");
-        observeRegistryMiss = true;
-
-        const secondError = yield* Effect.gen(function* () {
-          const inactiveError = yield* coordinator
-            .send(secondSubagentId, "Too late.")
-            .pipe(Effect.flip);
-
-          if (!(yield* Deferred.isDone(registryMiss))) {
-            return yield* Effect.fail("Process is still retained");
-          }
-
-          return inactiveError;
-        }).pipe(Effect.eventually);
-
-        expect(secondError).toBeInstanceOf(SubagentInactiveError);
-        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("exited");
-        yield* testHost.verify;
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          SubagentCoordinator.layer.pipe(
-            Layer.provideMerge(SubagentEventOutbox.layer),
-            Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
-            Layer.provideMerge(TestHost.layer),
-            Layer.provide(
-              Layer.succeed(
-                SubagentHarness,
-                SubagentHarness.of({
-                  makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
-                }),
-              ),
+        return yield* Effect.void;
+      }).pipe(Effect.eventually);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
             ),
-            Layer.provide(SubagentCapacity.layer(10)),
-            Layer.provideMerge(UnixSocketTransport.layer),
-            Layer.provide(NodeFileSystem.layer),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
         ),
-      );
-    }).pipe(Effect.scoped),
+      ),
+    ),
   );
 
   it.effect("removes a naturally exited subagent before a late kill", () =>
@@ -1296,81 +1227,69 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("removes a failed subagent before a late send", () =>
+  it.effect("removes a failed subagent from the registry", () =>
     Effect.gen(function* () {
-      const observeRegistryMiss = yield* Deferred.make<void>();
-      const registryMiss = yield* Deferred.make<void>();
-      const checkpoint = yield* SubagentCheckpoint.make;
+      const checkpoint = yield* SubagentCheckpoint;
+      const coordinator = yield* SubagentCoordinator;
+      const eventOutbox = yield* SubagentEventOutbox;
+      const registry = yield* SubagentRegistry;
+      const testHost = yield* TestHost;
       const errorSubagentId = yield* decodeSubagentId("sa_12345678_unavailable");
-      const observedCheckpoint = SubagentCheckpoint.of({
-        ...checkpoint,
-        has: Effect.fn("ObservedSubagentCheckpoint.has")(function* (subagentId: SubagentId) {
-          if (yield* Deferred.isDone(observeRegistryMiss)) {
-            yield* Deferred.succeed(registryMiss, undefined);
-          }
 
-          return yield* checkpoint.has(subagentId);
+      yield* testHost.stub([
+        SubagentHostUnavailableError.make({
+          subagentId: errorSubagentId,
+          host: "test",
+          reason: "Host unavailable",
         }),
+      ]);
+
+      const subagentId = yield* coordinator.create({
+        title: "Failed task",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
       });
 
+      expect(
+        yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
+      ).toEqual({
+        subagentId,
+        event: { kind: "failure", reason: "Host unavailable" },
+      });
+      expect(yield* checkpoint.get(subagentId)).toMatchObject({
+        status: "failed",
+        latestEvent: { kind: "failure", reason: "Host unavailable" },
+      });
       yield* Effect.gen(function* () {
-        const coordinator = yield* SubagentCoordinator;
-        const eventOutbox = yield* SubagentEventOutbox;
-        const testHost = yield* TestHost;
+        if ((yield* registry.lookup(subagentId)) !== undefined) {
+          return yield* Effect.fail("Subagent reference is still registered");
+        }
 
-        yield* testHost.stub([
-          SubagentHostUnavailableError.make({
-            subagentId: errorSubagentId,
-            host: "test",
-            reason: "Host unavailable",
-          }),
-        ]);
-        yield* Deferred.succeed(observeRegistryMiss, undefined);
-
-        const subagentId = yield* coordinator.create({
-          title: "Failed task",
-          prompt: "Complete the task.",
-          cwd: "/worktree",
-          mode: "ephemeral",
-        });
-
-        const error = yield* coordinator.send(subagentId, "Too late.").pipe(Effect.flip);
-
-        expect(error).toBeInstanceOf(SubagentInactiveError);
-        expect(yield* Deferred.isDone(registryMiss)).toBe(true);
-        expect(yield* checkpoint.get(subagentId)).toMatchObject({
-          status: "failed",
-          latestEvent: { kind: "failure", reason: "Host unavailable" },
-        });
-        expect(
-          yield* eventOutbox.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption)),
-        ).toEqual({
-          subagentId,
-          event: { kind: "failure", reason: "Host unavailable" },
-        });
-        yield* testHost.verify;
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          SubagentCoordinator.layer.pipe(
-            Layer.provideMerge(SubagentEventOutbox.layer),
-            Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
-            Layer.provideMerge(TestHost.layer),
-            Layer.provide(
-              Layer.succeed(
-                SubagentHarness,
-                SubagentHarness.of({
-                  makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
-                }),
-              ),
+        return yield* Effect.void;
+      }).pipe(Effect.eventually);
+      yield* testHost.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        SubagentCoordinator.layer.pipe(
+          Layer.provideMerge(SubagentEventOutbox.layer),
+          Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(TestHost.layer),
+          Layer.provide(
+            Layer.succeed(
+              SubagentHarness,
+              SubagentHarness.of({
+                makeCommand: () => Effect.succeed({ executable: "pi", args: [] }),
+              }),
             ),
-            Layer.provide(SubagentCapacity.layer(10)),
-            Layer.provideMerge(UnixSocketTransport.layer),
-            Layer.provide(NodeFileSystem.layer),
           ),
+          Layer.provide(SubagentCapacity.layer(10)),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
         ),
-      );
-    }).pipe(Effect.scoped),
+      ),
+    ),
   );
 
   it.effect("does not project Coordinator shutdown as killed", () =>

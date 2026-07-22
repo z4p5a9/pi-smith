@@ -52,7 +52,7 @@ it.describe("root extension", () => {
     }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 
-  it.effect("routes status validation and missing records through the loaded tool", () => {
+  it.effect("routes status and send validation and missing records through loaded tools", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
     vi.stubEnv("CMUX_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111");
     vi.stubEnv("CMUX_SURFACE_ID", "22222222-2222-4222-8222-222222222222");
@@ -66,6 +66,7 @@ it.describe("root extension", () => {
         ),
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const send = yield* Effect.fromNullishOr(loaded.tools.get("subagent_send"));
       const status = yield* Effect.fromNullishOr(loaded.tools.get("subagent_status"));
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
       const unusedContext: ExtensionContext = {
@@ -112,12 +113,38 @@ it.describe("root extension", () => {
             unusedContext,
           ),
         );
+        const invalidSend = yield* Effect.promise(() =>
+          send.definition.execute(
+            "send-invalid",
+            { subagentId: "invalid", message: "Hello." },
+            undefined,
+            undefined,
+            unusedContext,
+          ),
+        );
+        const unknownSend = yield* Effect.promise(() =>
+          send.definition.execute(
+            "send-unknown",
+            { subagentId: "sa_12345678_unknown", message: "Hello." },
+            undefined,
+            undefined,
+            unusedContext,
+          ),
+        );
 
         expect(invalid).toEqual({
           content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
           details: { subagentId: "invalid" },
         });
         expect(unknown).toEqual({
+          content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
+          details: { subagentId: "sa_12345678_unknown" },
+        });
+        expect(invalidSend).toEqual({
+          content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
+          details: { subagentId: "invalid" },
+        });
+        expect(unknownSend).toEqual({
           content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
           details: { subagentId: "sa_12345678_unknown" },
         });
