@@ -1,5 +1,5 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { Context, Effect, Layer, Option, Ref, Scope, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Scope, Semaphore, Stream } from "effect";
 
 import { SubagentLinkTransport } from "../../host/link/Transport.ts";
 import * as Protocol from "../../host/Protocol.ts";
@@ -9,19 +9,26 @@ const make = Effect.fn("PiChildSession.make")(function* (subagentId: SubagentId)
   const scope = yield* Scope.Scope;
   const transport = yield* SubagentLinkTransport;
   const session = yield* Ref.make(Option.none<Protocol.SubagentChildSession>());
+  const startPermit = yield* Semaphore.make(1);
 
-  const start = Effect.gen(function* () {
-    if (Option.isSome(yield* Ref.get(session))) {
-      return yield* Effect.void;
-    }
+  const start = startPermit
+    .withPermit(
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          if (Option.isSome(yield* Ref.get(session))) {
+            return yield* Effect.void;
+          }
 
-    const connected = yield* Protocol.connect(subagentId).pipe(
-      Effect.provideService(SubagentLinkTransport, transport),
-      Scope.provide(scope),
-    );
+          const connected = yield* Protocol.connect(subagentId).pipe(
+            Effect.provideService(SubagentLinkTransport, transport),
+            Scope.provide(scope),
+          );
 
-    return yield* Ref.set(session, Option.some(connected));
-  }).pipe(Effect.withSpan("PiChildSession.start"));
+          return yield* Ref.set(session, Option.some(connected));
+        }),
+      ),
+    )
+    .pipe(Effect.withSpan("PiChildSession.start"));
 
   const sendSettled = Effect.fn("PiChildSession.sendSettled")(function* (
     sessionManager: ExtensionContext["sessionManager"],
