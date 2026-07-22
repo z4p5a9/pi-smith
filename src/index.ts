@@ -17,7 +17,7 @@ import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
 import * as UnixSocketTransport from "./host/link/unix/UnixSocketTransport.ts";
 import { SubagentCapacity } from "./subagent/SubagentCapacity.ts";
 import { SubagentCheckpoint, SubagentRecord } from "./subagent/SubagentCheckpoint.ts";
-import { SubagentCoordinator } from "./subagent/SubagentCoordinator.ts";
+import { SubagentCoordinator, SubagentUnknownError } from "./subagent/SubagentCoordinator.ts";
 import { SubagentEventOutbox } from "./subagent/SubagentEventOutbox.ts";
 import { decodeSubagentId } from "./subagent/SubagentId.ts";
 
@@ -126,7 +126,7 @@ export default function extension(pi: ExtensionAPI): void {
     SubagentCoordinator.layer.pipe(
       Layer.provideMerge(SubagentEventOutbox.layer),
       Layer.provide(SubagentCapacity.layer(10)),
-      Layer.provide(SubagentCheckpoint.layer),
+      Layer.provideMerge(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
       Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
       Layer.provide(UnixSocketTransport.layer),
@@ -327,9 +327,15 @@ export default function extension(pi: ExtensionAPI): void {
     execute(toolCallId, { subagentId }) {
       return runtime.runPromise(
         Effect.gen(function* () {
-          const coordinator = yield* SubagentCoordinator;
+          const checkpoint = yield* SubagentCheckpoint;
           const id = yield* decodeSubagentId(subagentId);
-          const record = yield* coordinator.status(id);
+          const record = yield* checkpoint
+            .get(id)
+            .pipe(
+              Effect.catchTag("SubagentNotFoundError", () =>
+                SubagentUnknownError.make({ subagentId: id }),
+              ),
+            );
           const text = yield* encodeSubagentRecord(record).pipe(Effect.orDie);
 
           return {

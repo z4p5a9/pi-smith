@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+import { discoverAndLoadExtensions, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "@effect/vitest";
 import { Effect } from "effect";
 
@@ -49,6 +49,79 @@ it.describe("root extension", () => {
       expect(result.extensions).toHaveLength(1);
       expect(result.extensions[0]?.tools.size).toBe(0);
       expect(result.extensions[0]?.handlers.size).toBe(0);
+    }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect("routes status validation and missing records through the loaded tool", () => {
+    vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
+    vi.stubEnv("CMUX_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111");
+    vi.stubEnv("CMUX_SURFACE_ID", "22222222-2222-4222-8222-222222222222");
+
+    return Effect.gen(function* () {
+      const result = yield* Effect.promise(() =>
+        discoverAndLoadExtensions(
+          [fileURLToPath(new URL("./index.ts", import.meta.url))],
+          "/tmp/smith-extension-test",
+          "/tmp/smith-extension-test",
+        ),
+      );
+      const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const status = yield* Effect.fromNullishOr(loaded.tools.get("subagent_status"));
+      const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+      const unusedContext: ExtensionContext = {
+        get ui(): ExtensionContext["ui"] {
+          throw new Error("Status tool accessed UI context");
+        },
+        mode: "print",
+        hasUI: false,
+        cwd: "/tmp/smith-extension-test",
+        get sessionManager(): ExtensionContext["sessionManager"] {
+          throw new Error("Status tool accessed the session manager");
+        },
+        get modelRegistry(): ExtensionContext["modelRegistry"] {
+          throw new Error("Status tool accessed the model registry");
+        },
+        model: undefined,
+        isIdle: () => true,
+        isProjectTrusted: () => true,
+        signal: undefined,
+        abort: () => undefined,
+        hasPendingMessages: () => false,
+        shutdown: () => undefined,
+        getContextUsage: () => undefined,
+        compact: () => undefined,
+        getSystemPrompt: () => "",
+      };
+
+      yield* Effect.gen(function* () {
+        const invalid = yield* Effect.promise(() =>
+          status.definition.execute(
+            "status-invalid",
+            { subagentId: "invalid" },
+            undefined,
+            undefined,
+            unusedContext,
+          ),
+        );
+        const unknown = yield* Effect.promise(() =>
+          status.definition.execute(
+            "status-unknown",
+            { subagentId: "sa_12345678_unknown" },
+            undefined,
+            undefined,
+            unusedContext,
+          ),
+        );
+
+        expect(invalid).toEqual({
+          content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
+          details: { subagentId: "invalid" },
+        });
+        expect(unknown).toEqual({
+          content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
+          details: { subagentId: "sa_12345678_unknown" },
+        });
+      }).pipe(Effect.ensuring(Effect.promise(() => shutdown())));
     }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 

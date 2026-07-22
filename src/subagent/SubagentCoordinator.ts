@@ -127,19 +127,10 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
     );
   });
 
-  const status = Effect.fn("SubagentCoordinator.status")(function* (subagentId: SubagentId) {
-    return yield* checkpoint
-      .get(subagentId)
-      .pipe(
-        Effect.catchTag("SubagentNotFoundError", () => SubagentUnknownError.make({ subagentId })),
-      );
-  });
-
   return {
     create,
     send,
     kill,
-    status,
   };
 });
 

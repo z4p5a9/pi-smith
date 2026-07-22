@@ -46,7 +46,7 @@ it.describe("SubagentCheckpoint", () => {
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
 
-  it.effect("updates an existing subagent record with its terminal event", () =>
+  it.effect("gets a known terminal subagent record unchanged after update", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
@@ -64,9 +64,14 @@ it.describe("SubagentCheckpoint", () => {
         latestEvent: { kind: "message", content: "Task complete." },
       });
 
-      expect(yield* checkpoint.get(subagentId)).toMatchObject({
+      expect(yield* checkpoint.get(subagentId)).toEqual({
+        subagentId,
         status: "exited",
         latestEvent: { kind: "message", content: "Task complete." },
+        title: "Review API",
+        prompt: "Complete the task.",
+        cwd: "/worktree",
+        mode: "ephemeral",
       });
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
@@ -82,13 +87,13 @@ it.describe("SubagentCheckpoint", () => {
     }).pipe(Effect.provide(SubagentCheckpoint.layer)),
   );
 
-  it.effect("gets an existing subagent record", () =>
+  it.effect("gets a known nonterminal subagent record unchanged", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const subagentId = yield* decodeSubagentId("sa_12345678_review-api");
       const record = {
         subagentId,
-        status: "queued" as const,
+        status: "running" as const,
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
