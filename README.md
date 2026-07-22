@@ -15,7 +15,7 @@ Smith currently:
 - admits sub-agents through a FIFO queue and executes up to ten concurrently;
 - models each sub-agent as a process that owns its full lifecycle and always resolves a
   result: exited, failed, or killed — including on interruption;
-- generates stable sub-agent IDs and projects queued, starting, running, completed, and
+- generates stable sub-agent IDs and projects queued, starting, running, exited, and
   failed states into a best-effort in-memory checkpoint that never gates execution;
 - communicates over a Unix-socket protocol with per-frame identity and version
   validation, where acknowledgements mean "received" and the first valid frame of any

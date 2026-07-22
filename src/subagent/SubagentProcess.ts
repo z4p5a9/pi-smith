@@ -72,17 +72,20 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
         ),
       );
 
-  const accept = (event: SubagentEvent) =>
-    Effect.uninterruptible(
-      project(
-        spec.mode === "ephemeral"
-          ? {
-              status: event.kind === "message" ? "completed" : "failed",
-              latestEvent: event,
-            }
-          : { latestEvent: event },
-      ).pipe(Effect.andThen(Queue.offer(events, event)), Effect.asVoid),
-    );
+  const accept = Effect.fn("SubagentProcess.accept")(function* (event: SubagentEvent) {
+    const exits = spec.mode === "ephemeral";
+
+    yield* project({ latestEvent: event });
+
+    if (exits) {
+      yield* project({ status: "exited" });
+      yield* Deferred.succeed(result, { kind: "exited" });
+    }
+
+    yield* Queue.offer(events, event);
+
+    return exits;
+  }, Effect.uninterruptible);
 
   const run = Effect.gen(function* () {
     const command = yield* harness.makeCommand(subagentId, spec);
@@ -114,7 +117,10 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
           );
 
           if (wake.kind === "event") {
-            yield* accept(wake.event);
+            if (yield* accept(wake.event)) {
+              return undefined;
+            }
+
             pending -= 1;
 
             if (pending > 0) {
@@ -133,8 +139,7 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
       }),
     );
 
-    if (spec.mode === "ephemeral") {
-      yield* Deferred.succeed(result, { kind: "exited" });
+    if (session === undefined) {
       return yield* Effect.void;
     }
 

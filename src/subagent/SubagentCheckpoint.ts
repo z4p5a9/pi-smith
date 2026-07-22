@@ -12,7 +12,7 @@ export const SubagentRecord = Schema.Struct({
     "running",
     "waiting",
     "idle",
-    "completed",
+    "exited",
     "failed",
     "killed",
   ]),

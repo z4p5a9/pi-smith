@@ -30,7 +30,7 @@ import {
 import { decodeSubagentId, type SubagentId } from "./SubagentId.ts";
 
 it.describe("SubagentCoordinator", () => {
-  it.effect("projects and retains one completed message before notification consumption", () =>
+  it.effect("projects and retains one exited message before notification consumption", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
@@ -60,7 +60,7 @@ it.describe("SubagentCoordinator", () => {
       });
       expect(yield* checkpoint.get(subagentId)).toEqual({
         subagentId,
-        status: "completed",
+        status: "exited",
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
@@ -72,7 +72,7 @@ it.describe("SubagentCoordinator", () => {
         .changes(subagentId)
         .pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-      expect(observed.status).toBe("completed");
+      expect(observed.status).toBe("exited");
       yield* Effect.suspend(() =>
         testHost.active.pipe(
           Effect.flatMap((active) =>
@@ -186,7 +186,7 @@ it.describe("SubagentCoordinator", () => {
         event: { kind: "failure", reason: "Model request failed" },
       });
       expect(yield* checkpoint.get(subagentId)).toMatchObject({
-        status: "failed",
+        status: "exited",
         latestEvent: { kind: "failure", reason: "Model request failed" },
       });
       yield* testHost.verify;
@@ -800,9 +800,9 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
-  it.effect("preserves completed when completion races with kill", () =>
+  it.effect("preserves exited when exit races with kill", () =>
     Effect.gen(function* () {
-      const completionProjected = yield* Deferred.make<void>();
+      const exitProjected = yield* Deferred.make<void>();
       const releaseProjection = yield* Deferred.make<void>();
       const checkpoint = yield* SubagentCheckpoint.make;
       const controlledCheckpoint = SubagentCheckpoint.of({
@@ -813,8 +813,8 @@ it.describe("SubagentCoordinator", () => {
         ) {
           yield* checkpoint.update(subagentId, fields);
 
-          if (fields.status === "completed") {
-            yield* Deferred.succeed(completionProjected, undefined);
+          if (fields.status === "exited") {
+            yield* Deferred.succeed(exitProjected, undefined);
             yield* Deferred.await(releaseProjection);
           }
         }),
@@ -838,10 +838,10 @@ it.describe("SubagentCoordinator", () => {
         const child = yield* Protocol.connect(subagentId);
 
         yield* child.send({ kind: "message", content: "Task complete." });
-        yield* Deferred.await(completionProjected);
+        yield* Deferred.await(exitProjected);
 
         expect(yield* checkpoint.get(subagentId)).toMatchObject({
-          status: "completed",
+          status: "exited",
           latestEvent: { kind: "message", content: "Task complete." },
         });
 
@@ -856,7 +856,7 @@ it.describe("SubagentCoordinator", () => {
 
         expect(error).toBeInstanceOf(SubagentInactiveError);
         expect(yield* checkpoint.get(subagentId)).toMatchObject({
-          status: "completed",
+          status: "exited",
           latestEvent: { kind: "message", content: "Task complete." },
         });
         yield* testHost.verify;
@@ -941,7 +941,7 @@ it.describe("SubagentCoordinator", () => {
     ),
   );
 
-  it.effect("removes naturally completed subagents before late sends", () =>
+  it.effect("removes naturally exited subagents before late sends", () =>
     Effect.gen(function* () {
       let observeRegistryMiss = false;
       let registryMiss = yield* Deferred.make<void>();
@@ -977,7 +977,7 @@ it.describe("SubagentCoordinator", () => {
         yield* firstChild.send({ kind: "message", content: "First task complete." });
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("exited");
         observeRegistryMiss = true;
 
         const firstError = yield* Effect.gen(function* () {
@@ -993,7 +993,7 @@ it.describe("SubagentCoordinator", () => {
         }).pipe(Effect.eventually);
 
         expect(firstError).toBeInstanceOf(SubagentInactiveError);
-        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(firstSubagentId)).status).toBe("exited");
 
         observeRegistryMiss = false;
         registryMiss = yield* Deferred.make<void>();
@@ -1012,7 +1012,7 @@ it.describe("SubagentCoordinator", () => {
         yield* secondChild.send({ kind: "message", content: "Second task complete." });
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("exited");
         observeRegistryMiss = true;
 
         const secondError = yield* Effect.gen(function* () {
@@ -1028,7 +1028,7 @@ it.describe("SubagentCoordinator", () => {
         }).pipe(Effect.eventually);
 
         expect(secondError).toBeInstanceOf(SubagentInactiveError);
-        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(secondSubagentId)).status).toBe("exited");
         yield* testHost.verify;
       }).pipe(
         Effect.scoped,
@@ -1053,7 +1053,7 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("removes a naturally completed subagent before a late kill", () =>
+  it.effect("removes a naturally exited subagent before a late kill", () =>
     Effect.gen(function* () {
       const observeRegistryMiss = yield* Deferred.make<void>();
       const registryMiss = yield* Deferred.make<void>();
@@ -1089,7 +1089,7 @@ it.describe("SubagentCoordinator", () => {
         yield* child.send({ kind: "message", content: "Task complete." });
         yield* coordinator.events.pipe(Stream.runHead, Effect.flatMap(Effect.fromOption));
 
-        expect((yield* checkpoint.get(subagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(subagentId)).status).toBe("exited");
         yield* Deferred.succeed(observeRegistryMiss, undefined);
 
         const error = yield* Effect.gen(function* () {
@@ -1103,7 +1103,7 @@ it.describe("SubagentCoordinator", () => {
         }).pipe(Effect.eventually);
 
         expect(error).toBeInstanceOf(SubagentInactiveError);
-        expect((yield* checkpoint.get(subagentId)).status).toBe("completed");
+        expect((yield* checkpoint.get(subagentId)).status).toBe("exited");
         yield* testHost.verify;
       }).pipe(
         Effect.scoped,

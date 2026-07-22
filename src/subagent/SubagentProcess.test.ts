@@ -50,7 +50,7 @@ it.describe("SubagentProcess", () => {
         { kind: "message", content: "Task complete." },
       );
       expect(yield* checkpoint.get(subagentId)).toMatchObject({
-        status: "completed",
+        status: "exited",
         latestEvent: { kind: "message", content: "Task complete." },
       });
 

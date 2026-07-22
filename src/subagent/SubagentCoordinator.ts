@@ -124,14 +124,8 @@ const make = Effect.fn("SubagentCoordinator.make")(function* () {
         yield* FiberMap.remove(children, subagentId);
 
         const result = yield* process.await;
-        const record = yield* checkpoint.get(subagentId);
 
-        if (
-          result.kind !== "killed" ||
-          record.status === "completed" ||
-          record.status === "failed" ||
-          record.status === "killed"
-        ) {
+        if (result.kind !== "killed") {
           return yield* SubagentInactiveError.make({ subagentId });
         }
 
