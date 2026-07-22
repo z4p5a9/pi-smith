@@ -73,7 +73,7 @@ export const make = Effect.fn("Link.make")(function* (
 ): Effect.fn.Return<Link, never, Scope.Scope> {
   const encoder = new TextEncoder();
   const write = yield* socket.writer;
-  const inbound = yield* Queue.dropping<
+  const inbox = yield* Queue.dropping<
     { readonly data: Datagram; readonly ack: Effect.Effect<void> },
     Cause.Done
   >(1);
@@ -134,7 +134,7 @@ export const make = Effect.fn("Link.make")(function* (
       )
       .pipe(Effect.ignore);
 
-    const offered = yield* Queue.offer(inbound, {
+    const offered = yield* Queue.offer(inbox, {
       data: frame.data,
       ack,
     });
@@ -198,7 +198,7 @@ export const make = Effect.fn("Link.make")(function* (
         yield* Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
           ? Deferred.failCause(lifetime, exit.cause)
           : Deferred.succeed(lifetime, undefined);
-        yield* Queue.end(inbound);
+        yield* Queue.end(inbox);
       }),
     ),
     Effect.ignore,
@@ -238,7 +238,7 @@ export const make = Effect.fn("Link.make")(function* (
 
   return {
     send,
-    recv: Queue.take(inbound).pipe(Effect.catch(() => disconnected)),
+    recv: Queue.take(inbox).pipe(Effect.catch(() => disconnected)),
     closed: Deferred.await(lifetime),
   } satisfies Link;
 });

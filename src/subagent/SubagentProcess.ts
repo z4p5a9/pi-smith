@@ -97,40 +97,42 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
 
         yield* project({ status: "running" });
 
-        let eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
-        let pending = 1;
+        let inboundFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
+        let pendingEvents = 1;
 
-        while (pending > 0) {
-          const wake = yield* Effect.raceFirst(
-            Fiber.join(eventFiber).pipe(
-              Effect.map((childEvent) => ({
-                kind: "event" as const,
-                event: childEvent,
+        while (pendingEvents > 0) {
+          const next = yield* Effect.raceFirst(
+            Fiber.join(inboundFiber).pipe(
+              Effect.map((payload) => ({
+                kind: "inbound" as const,
+                payload,
               })),
             ),
             Queue.take(outbox).pipe(
-              Effect.map((message) => ({
-                kind: "send" as const,
-                message,
+              Effect.map((payload) => ({
+                kind: "outbound" as const,
+                payload,
               })),
             ),
           );
 
-          if (wake.kind === "event") {
-            if (yield* accept(wake.event)) {
+          if (next.kind === "inbound") {
+            if (yield* accept(next.payload)) {
               return undefined;
             }
 
-            pending -= 1;
+            pendingEvents -= 1;
 
-            if (pending > 0) {
-              eventFiber = yield* started.take.pipe(Effect.forkScoped({ startImmediately: true }));
+            if (pendingEvents > 0) {
+              inboundFiber = yield* started.take.pipe(
+                Effect.forkScoped({ startImmediately: true }),
+              );
             }
           } else {
-            const sent = yield* sendToSession(started, wake.message);
+            const sent = yield* sendToSession(started, next.payload);
 
             if (sent) {
-              pending += 1;
+              pendingEvents += 1;
             }
           }
         }
@@ -143,30 +145,30 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
       return yield* Effect.void;
     }
 
-    let eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+    let inboundFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
 
     return yield* Effect.forever(
       Effect.gen(function* () {
         yield* project({ status: "idle" });
 
-        const wake = yield* Effect.raceFirst(
-          Fiber.join(eventFiber).pipe(
-            Effect.map((event) => ({
-              kind: "event" as const,
-              event,
+        const next = yield* Effect.raceFirst(
+          Fiber.join(inboundFiber).pipe(
+            Effect.map((payload) => ({
+              kind: "inbound" as const,
+              payload,
             })),
           ),
           Queue.take(outbox).pipe(
-            Effect.map((message) => ({
-              kind: "send" as const,
-              message,
+            Effect.map((payload) => ({
+              kind: "outbound" as const,
+              payload,
             })),
           ),
         );
 
-        if (wake.kind === "event") {
-          yield* accept(wake.event);
-          eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+        if (next.kind === "inbound") {
+          yield* accept(next.payload);
+          inboundFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
           return yield* Effect.void;
         }
 
@@ -174,51 +176,51 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
         return yield* capacity.withPermit(
           Effect.gen(function* () {
             yield* project({ status: "running" });
-            const sent = yield* sendToSession(session, wake.message);
+            const sent = yield* sendToSession(session, next.payload);
 
             if (!sent) {
               return yield* Effect.void;
             }
 
-            let pending = 1;
+            let pendingEvents = 1;
 
-            while (pending > 0) {
-              const turnWake = yield* Effect.raceFirst(
-                Fiber.join(eventFiber).pipe(
-                  Effect.map((childEvent) => ({
-                    kind: "event" as const,
-                    event: childEvent,
+            while (pendingEvents > 0) {
+              const turn = yield* Effect.raceFirst(
+                Fiber.join(inboundFiber).pipe(
+                  Effect.map((payload) => ({
+                    kind: "inbound" as const,
+                    payload,
                   })),
                 ),
                 Queue.take(outbox).pipe(
-                  Effect.map((message) => ({
-                    kind: "send" as const,
-                    message,
+                  Effect.map((payload) => ({
+                    kind: "outbound" as const,
+                    payload,
                   })),
                 ),
               );
 
-              if (turnWake.kind === "event") {
-                yield* accept(turnWake.event);
-                pending -= 1;
+              if (turn.kind === "inbound") {
+                yield* accept(turn.payload);
+                pendingEvents -= 1;
 
-                if (pending > 0) {
-                  eventFiber = yield* session.take.pipe(
+                if (pendingEvents > 0) {
+                  inboundFiber = yield* session.take.pipe(
                     Effect.forkScoped({
                       startImmediately: true,
                     }),
                   );
                 }
               } else {
-                const turnSent = yield* sendToSession(session, turnWake.message);
+                const outboundSent = yield* sendToSession(session, turn.payload);
 
-                if (turnSent) {
-                  pending += 1;
+                if (outboundSent) {
+                  pendingEvents += 1;
                 }
               }
             }
 
-            eventFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
+            inboundFiber = yield* session.take.pipe(Effect.forkScoped({ startImmediately: true }));
             return yield* Effect.void;
           }),
         );
