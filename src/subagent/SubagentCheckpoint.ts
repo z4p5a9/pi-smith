@@ -6,16 +6,7 @@ import { SubagentSpec } from "./SubagentSpec.ts";
 
 export const SubagentRecord = Schema.Struct({
   subagentId: SubagentId,
-  status: Schema.Literals([
-    "queued",
-    "starting",
-    "running",
-    "waiting",
-    "idle",
-    "exited",
-    "failed",
-    "killed",
-  ]),
+  status: Schema.Literals(["queued", "starting", "running", "idle", "exited", "failed", "killed"]),
   latestEvent: Schema.optional(SubagentEvent),
   ...SubagentSpec.fields,
 });

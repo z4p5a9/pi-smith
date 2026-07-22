@@ -631,7 +631,7 @@ it.describe("SubagentCoordinator", () => {
 
         expect(oversizedMessageId).toMatch(/^msg_[a-z0-9]{24}$/);
         yield* checkpoint.changes(subagentId).pipe(
-          Stream.filter((record) => record.status === "waiting"),
+          Stream.filter((record) => record.status === "queued"),
           Stream.runHead,
         );
         expect(yield* Deferred.isDone(deliveryReceived)).toBe(false);
@@ -727,7 +727,7 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("projects killing a waiting persistent subagent as killed", () =>
+  it.effect("projects killing a queued persistent subagent as killed", () =>
     Effect.gen(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const coordinator = yield* SubagentCoordinator;
@@ -737,7 +737,7 @@ it.describe("SubagentCoordinator", () => {
       yield* testHost.stub([null]);
 
       const subagentId = yield* coordinator.create({
-        title: "Waiting assistant",
+        title: "Queued assistant",
         prompt: "Stand by.",
         cwd: "/worktree",
         mode: "persistent",
@@ -767,7 +767,7 @@ it.describe("SubagentCoordinator", () => {
       yield* Deferred.await(capacityAcquired);
       yield* coordinator.send(subagentId, "Review the diff.");
       yield* checkpoint.changes(subagentId).pipe(
-        Stream.filter((record) => record.status === "waiting"),
+        Stream.filter((record) => record.status === "queued"),
         Stream.runHead,
       );
 

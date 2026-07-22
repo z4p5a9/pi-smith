@@ -170,7 +170,7 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
           return yield* Effect.void;
         }
 
-        yield* project({ status: "waiting" });
+        yield* project({ status: "queued" });
         return yield* capacity.withPermit(
           Effect.gen(function* () {
             yield* project({ status: "running" });
