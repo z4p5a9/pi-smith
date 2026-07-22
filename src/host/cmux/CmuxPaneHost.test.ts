@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, PlatformError, Schema, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, PlatformError, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 
 import { TestChildProcessSpawner } from "../../testing/TestChildProcessSpawner.ts";
@@ -16,6 +16,7 @@ import {
 } from "../Host.ts";
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+const decodeJson = Schema.decodeSync(Schema.UnknownFromJsonString);
 
 it.describe("CmuxPaneHost", () => {
   it.effect("creates an exact CMUX pane, delivers child events, and closes it", () => {
@@ -31,6 +32,17 @@ it.describe("CmuxPaneHost", () => {
       const hostScope = yield* Scope.fork(parentScope);
 
       yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
         {
           exitCode: Effect.succeed(0),
           stdout: encodeJson({
@@ -73,6 +85,10 @@ it.describe("CmuxPaneHost", () => {
       expect(yield* childProcesses.calls).toMatchObject([
         {
           command: "cmux",
+          args: ["rpc", "pane.list", encodeJson({ workspace_id: workspaceId })],
+        },
+        {
+          command: "cmux",
           args: [
             "rpc",
             "pane.create",
@@ -80,6 +96,7 @@ it.describe("CmuxPaneHost", () => {
               workspace_id: workspaceId,
               surface_id: rootSurfaceId,
               direction: "right",
+              initial_divider_position: 0.5,
               type: "terminal",
               focus: false,
               initial_command: `'/opt/pi' '--title' 'Review'"'"'s API' ''`,
@@ -100,6 +117,351 @@ it.describe("CmuxPaneHost", () => {
           ],
         },
       ]);
+      yield* childProcesses.verify;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        CmuxPaneHost.layer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
+          Layer.provideMerge(TestChildProcessSpawner.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    );
+  });
+
+  it.effect("splits the largest subagent pane along its longest dimension", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const rootSurfaceId = "22222222-2222-4222-8222-222222222222";
+    const childSurfaceIds = [
+      "33333333-3333-4333-8333-333333333333",
+      "44444444-4444-4444-8444-444444444444",
+      "55555555-5555-4555-8555-555555555555",
+      "66666666-6666-4666-8666-666666666666",
+    ];
+
+    return Effect.gen(function* () {
+      const childProcesses = yield* TestChildProcessSpawner;
+      const host = yield* SubagentHost;
+      const parentScope = yield* Scope.Scope;
+      const hostScopes: Array<Scope.Closeable> = [];
+      const subagentIds = yield* Effect.forEach(["first", "second", "third", "fourth"], (name) =>
+        decodeSubagentId(`sa_12345678_cmux-${name}`),
+      );
+
+      yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: childSurfaceIds[0] }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 1000, height: 1200 },
+              },
+              {
+                surface_ids: [childSurfaceIds[0]],
+                pixel_frame: { x: 1000, y: 0, width: 1000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: childSurfaceIds[1] }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 1000, height: 1200 },
+              },
+              {
+                surface_ids: [childSurfaceIds[0]],
+                pixel_frame: { x: 1000, y: 0, width: 1000, height: 600 },
+              },
+              {
+                surface_ids: [childSurfaceIds[1]],
+                pixel_frame: { x: 1000, y: 600, width: 1000, height: 600 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: childSurfaceIds[2] }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 1000, height: 1200 },
+              },
+              {
+                surface_ids: [childSurfaceIds[0]],
+                pixel_frame: { x: 1000, y: 0, width: 500, height: 600 },
+              },
+              {
+                surface_ids: [childSurfaceIds[2]],
+                pixel_frame: { x: 1500, y: 0, width: 500, height: 600 },
+              },
+              {
+                surface_ids: [childSurfaceIds[1]],
+                pixel_frame: { x: 1000, y: 600, width: 1000, height: 600 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: childSurfaceIds[3] }),
+        },
+        { exitCode: Effect.succeed(0) },
+        { exitCode: Effect.succeed(0) },
+        { exitCode: Effect.succeed(0) },
+        { exitCode: Effect.succeed(0) },
+      ]);
+
+      for (let index = 0; index < subagentIds.length; index++) {
+        const subagentId = subagentIds[index];
+
+        if (subagentId === undefined) {
+          return yield* Effect.die("Missing test subagent ID");
+        }
+
+        const hostScope = yield* Scope.fork(parentScope);
+        hostScopes.push(hostScope);
+        const starting = yield* host
+          .start(subagentId, { executable: "pi", args: [] })
+          .pipe(Scope.provide(hostScope), Effect.forkChild({ startImmediately: true }));
+
+        yield* Effect.suspend(() =>
+          childProcesses.calls.pipe(
+            Effect.flatMap((calls) =>
+              calls.length >= (index + 1) * 2 ? Effect.void : Effect.fail("No pane yet"),
+            ),
+          ),
+        ).pipe(Effect.eventually);
+
+        yield* Protocol.connect(subagentId);
+        yield* Fiber.join(starting);
+      }
+
+      const calls = yield* childProcesses.calls;
+      const creations: Array<unknown> = [];
+
+      for (const call of calls) {
+        if (!("args" in call) || call.args[1] !== "pane.create") {
+          continue;
+        }
+
+        creations.push(decodeJson(call.args[2] ?? ""));
+      }
+
+      expect(creations).toMatchObject([
+        {
+          surface_id: rootSurfaceId,
+          direction: "right",
+          initial_divider_position: 0.5,
+        },
+        {
+          surface_id: childSurfaceIds[0],
+          direction: "down",
+          initial_divider_position: 0.5,
+        },
+        {
+          surface_id: childSurfaceIds[0],
+          direction: "right",
+          initial_divider_position: 0.5,
+        },
+        {
+          surface_id: childSurfaceIds[1],
+          direction: "right",
+          initial_divider_position: 0.5,
+        },
+      ]);
+
+      for (const hostScope of hostScopes) {
+        yield* Scope.close(hostScope, Exit.void);
+      }
+
+      yield* childProcesses.verify;
+      return yield* Effect.void;
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        CmuxPaneHost.layer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
+          Layer.provideMerge(TestChildProcessSpawner.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    );
+  });
+
+  it.effect("rejects a workspace containing panes not owned by Smith", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const rootSurfaceId = "22222222-2222-4222-8222-222222222222";
+
+    return Effect.gen(function* () {
+      const childProcesses = yield* TestChildProcessSpawner;
+      const host = yield* SubagentHost;
+      const subagentId = yield* decodeSubagentId("sa_12345678_cmux-foreign-pane");
+
+      yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 1000, height: 1200 },
+              },
+              {
+                surface_ids: ["77777777-7777-4777-8777-777777777777"],
+                pixel_frame: { x: 1000, y: 0, width: 1000, height: 1200 },
+              },
+            ],
+          }),
+        },
+      ]);
+
+      const error = yield* host
+        .start(subagentId, { executable: "pi", args: [] })
+        .pipe(Effect.scoped, Effect.flip);
+
+      expect(error).toMatchObject({
+        reason: "CMUX workspace contains panes not owned by Smith",
+      });
+      yield* childProcesses.verify;
+    }).pipe(
+      Effect.provide(
+        CmuxPaneHost.layer({ workspaceId, surfaceId: rootSurfaceId }).pipe(
+          Layer.provideMerge(TestChildProcessSpawner.layer),
+          Layer.provideMerge(UnixSocketTransport.layer),
+          Layer.provide(NodeFileSystem.layer),
+        ),
+      ),
+    );
+  });
+
+  it.effect("serializes concurrent pane creation", () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const rootSurfaceId = "22222222-2222-4222-8222-222222222222";
+    const firstSurfaceId = "33333333-3333-4333-8333-333333333333";
+    const secondSurfaceId = "44444444-4444-4444-8444-444444444444";
+
+    return Effect.gen(function* () {
+      const childProcesses = yield* TestChildProcessSpawner;
+      const host = yield* SubagentHost;
+      const parentScope = yield* Scope.Scope;
+      const firstScope = yield* Scope.fork(parentScope);
+      const secondScope = yield* Scope.fork(parentScope);
+      const firstListExitCode = yield* Deferred.make<number>();
+      const firstSubagentId = yield* decodeSubagentId("sa_12345678_cmux-concurrent-first");
+      const secondSubagentId = yield* decodeSubagentId("sa_12345678_cmux-concurrent-second");
+
+      yield* childProcesses.stub([
+        {
+          exitCode: Deferred.await(firstListExitCode),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: firstSurfaceId }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: [rootSurfaceId],
+                pixel_frame: { x: 0, y: 0, width: 1000, height: 1200 },
+              },
+              {
+                surface_ids: [firstSurfaceId],
+                pixel_frame: { x: 1000, y: 0, width: 1000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({ surface_id: secondSurfaceId }),
+        },
+        { exitCode: Effect.succeed(0) },
+        { exitCode: Effect.succeed(0) },
+      ]);
+
+      const first = yield* host
+        .start(firstSubagentId, { executable: "pi", args: [] })
+        .pipe(Scope.provide(firstScope), Effect.forkChild({ startImmediately: true }));
+
+      yield* Effect.suspend(() =>
+        childProcesses.calls.pipe(
+          Effect.flatMap((calls) =>
+            calls.length === 1 ? Effect.void : Effect.fail("No list yet"),
+          ),
+        ),
+      ).pipe(Effect.eventually);
+
+      const second = yield* host
+        .start(secondSubagentId, { executable: "pi", args: [] })
+        .pipe(Scope.provide(secondScope), Effect.forkChild({ startImmediately: true }));
+
+      expect(yield* childProcesses.calls).toHaveLength(1);
+      yield* Deferred.succeed(firstListExitCode, 0);
+
+      yield* Effect.suspend(() =>
+        childProcesses.calls.pipe(
+          Effect.flatMap((calls) =>
+            calls.length === 4 ? Effect.void : Effect.fail("Panes not created"),
+          ),
+        ),
+      ).pipe(Effect.eventually);
+
+      yield* Protocol.connect(firstSubagentId);
+      yield* Protocol.connect(secondSubagentId);
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+
+      const methods: Array<string | undefined> = [];
+
+      for (const call of yield* childProcesses.calls) {
+        if ("args" in call) {
+          methods.push(call.args[1]);
+        }
+      }
+
+      expect(methods).toEqual(["pane.list", "pane.create", "pane.list", "pane.create"]);
+
+      yield* Scope.close(firstScope, Exit.void);
+      yield* Scope.close(secondScope, Exit.void);
       yield* childProcesses.verify;
     }).pipe(
       Effect.scoped,
@@ -158,6 +520,17 @@ it.describe("CmuxPaneHost", () => {
 
       yield* childProcesses.stub([
         {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: ["22222222-2222-4222-8222-222222222222"],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
           exitCode: Effect.succeed(1),
           stderr: "method_not_found: Unknown method",
         },
@@ -192,7 +565,20 @@ it.describe("CmuxPaneHost", () => {
       const host = yield* SubagentHost;
       const subagentId = yield* decodeSubagentId("sa_12345678_cmux-malformed");
 
-      yield* childProcesses.stub([{ exitCode: Effect.succeed(0), stdout: "{}" }]);
+      yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: ["22222222-2222-4222-8222-222222222222"],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        { exitCode: Effect.succeed(0), stdout: "{}" },
+      ]);
 
       const error = yield* host
         .start(subagentId, { executable: "pi", args: [] })
@@ -224,6 +610,17 @@ it.describe("CmuxPaneHost", () => {
       const subagentId = yield* decodeSubagentId("sa_12345678_cmux-start-timeout");
 
       yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: ["22222222-2222-4222-8222-222222222222"],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
         {
           exitCode: Effect.succeed(0),
           stdout: encodeJson({ surface_id: childSurfaceId }),
@@ -278,6 +675,17 @@ it.describe("CmuxPaneHost", () => {
         {
           exitCode: Effect.succeed(0),
           stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: ["22222222-2222-4222-8222-222222222222"],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
             surface_id: childSurfaceId,
           }),
         },
@@ -326,6 +734,17 @@ it.describe("CmuxPaneHost", () => {
       const hostScope = yield* Scope.fork(parentScope);
 
       yield* childProcesses.stub([
+        {
+          exitCode: Effect.succeed(0),
+          stdout: encodeJson({
+            panes: [
+              {
+                surface_ids: ["22222222-2222-4222-8222-222222222222"],
+                pixel_frame: { x: 0, y: 0, width: 2000, height: 1200 },
+              },
+            ],
+          }),
+        },
         {
           exitCode: Effect.succeed(0),
           stdout: encodeJson({ surface_id: childSurfaceId }),

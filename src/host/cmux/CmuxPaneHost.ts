@@ -1,4 +1,4 @@
-import { Config, Duration, Effect, Layer, Schema, Stream } from "effect";
+import { Config, Duration, Effect, Layer, Schema, Semaphore, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { isPositiveFiniteDuration } from "../../lib/schema.ts";
@@ -23,6 +23,24 @@ const decodeCmuxPaneCreateResponse = Schema.decodeUnknownEffect(
   Schema.fromJsonString(CmuxPaneCreateResponse),
 );
 
+const CmuxPaneListResponse = Schema.Struct({
+  panes: Schema.Array(
+    Schema.Struct({
+      surface_ids: Schema.Array(Schema.String.check(Schema.isUUID())),
+      pixel_frame: Schema.Struct({
+        x: Schema.Finite,
+        y: Schema.Finite,
+        width: Schema.Finite.check(Schema.isGreaterThan(0)),
+        height: Schema.Finite.check(Schema.isGreaterThan(0)),
+      }),
+    }),
+  ),
+});
+
+const decodeCmuxPaneListResponse = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(CmuxPaneListResponse),
+);
+
 const config = Config.schema(
   Schema.DurationFromString.check(isPositiveFiniteDuration()),
   "SMITH_CMUX_PANE_CLOSE_TIMEOUT",
@@ -33,6 +51,8 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
     const transport = yield* SubagentLinkTransport;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const closeTimeout = yield* config;
+    const layout = yield* Semaphore.make(1);
+    const subagentSurfaceIds = new Set<string>();
 
     const rpc = Effect.fn("CmuxPaneHost.rpc")(function* (
       method: string,
@@ -59,19 +79,125 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       return { exitCode, stdout, stderr };
     });
 
-    const create = Effect.fn("CmuxPaneHost.create")(function* (
+    const listPanes = Effect.fn("CmuxPaneHost.listPanes")(function* (subagentId: SubagentId) {
+      const result = yield* rpc("pane.list", { workspace_id: root.workspaceId }).pipe(
+        Effect.scoped,
+        Effect.mapError((error) =>
+          SubagentHostUnavailableError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: error.message,
+          }),
+        ),
+      );
+
+      if (result.exitCode !== 0) {
+        return yield* SubagentHostStartError.make({
+          subagentId,
+          host: "cmux-pane",
+          reason: result.stderr.trim(),
+        });
+      }
+
+      return yield* decodeCmuxPaneListResponse(result.stdout).pipe(
+        Effect.mapError((error) =>
+          SubagentHostResponseError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: String(error),
+          }),
+        ),
+      );
+    });
+
+    const selectPaneSplit = Effect.fn("CmuxPaneHost.selectPaneSplit")(function* (
+      subagentId: SubagentId,
+      response: typeof CmuxPaneListResponse.Type,
+    ) {
+      const rootPane = response.panes.find((pane) => pane.surface_ids.includes(root.surfaceId));
+
+      if (rootPane === undefined) {
+        return yield* SubagentHostStartError.make({
+          subagentId,
+          host: "cmux-pane",
+          reason: "CMUX root surface is not in the configured workspace",
+        });
+      }
+
+      let sourceSurfaceId: string;
+      let direction: "right" | "down";
+
+      if (subagentSurfaceIds.size === 0) {
+        if (response.panes.length !== 1) {
+          return yield* SubagentHostStartError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: "CMUX workspace contains panes not owned by Smith",
+          });
+        }
+
+        sourceSurfaceId = root.surfaceId;
+        direction = "right";
+      } else {
+        let target:
+          | {
+              readonly surfaceId: string;
+              readonly x: number;
+              readonly y: number;
+              readonly width: number;
+              readonly height: number;
+            }
+          | undefined;
+
+        for (const pane of response.panes) {
+          const surfaceId = pane.surface_ids.find((current) => subagentSurfaceIds.has(current));
+
+          if (surfaceId === undefined) {
+            continue;
+          }
+
+          if (
+            target === undefined ||
+            pane.pixel_frame.width * pane.pixel_frame.height > target.width * target.height ||
+            (pane.pixel_frame.width * pane.pixel_frame.height === target.width * target.height &&
+              (pane.pixel_frame.y < target.y ||
+                (pane.pixel_frame.y === target.y && pane.pixel_frame.x < target.x)))
+          ) {
+            target = { ...pane.pixel_frame, surfaceId };
+          }
+        }
+
+        if (target === undefined) {
+          return yield* SubagentHostStartError.make({
+            subagentId,
+            host: "cmux-pane",
+            reason: "CMUX subagent panes are not in the configured workspace",
+          });
+        }
+
+        sourceSurfaceId = target.surfaceId;
+        direction = target.width >= target.height ? "right" : "down";
+      }
+
+      return { sourceSurfaceId, direction };
+    });
+
+    const createPane = Effect.fn("CmuxPaneHost.createPane")(function* (
       subagentId: SubagentId,
       command: SubagentCommand,
-      workspaceId: string,
-      surfaceId: string,
+      split: {
+        readonly sourceSurfaceId: string;
+        readonly direction: "right" | "down";
+      },
     ) {
       const initialCommand = [command.executable, ...command.args]
         .map((argument) => `'${argument.replaceAll("'", `'"'"'`)}'`)
         .join(" ");
       const result = yield* rpc("pane.create", {
-        workspace_id: workspaceId,
-        surface_id: surfaceId,
-        direction: "right",
+        workspace_id: root.workspaceId,
+        surface_id: split.sourceSurfaceId,
+        direction: split.direction,
+        initial_divider_position: 0.5,
         type: "terminal",
         focus: false,
         initial_command: initialCommand,
@@ -96,7 +222,7 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
         });
       }
 
-      const response = yield* decodeCmuxPaneCreateResponse(result.stdout).pipe(
+      return yield* decodeCmuxPaneCreateResponse(result.stdout).pipe(
         Effect.mapError((error) =>
           SubagentHostResponseError.make({
             subagentId,
@@ -105,16 +231,11 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
           }),
         ),
       );
-
-      return response;
     });
 
-    const close = Effect.fn("CmuxPaneHost.close")(function* (
-      workspaceId: string,
-      surfaceId: string,
-    ) {
+    const closeSurface = Effect.fn("CmuxPaneHost.closeSurface")(function* (surfaceId: string) {
       const result = yield* rpc("surface.close", {
-        workspace_id: workspaceId,
+        workspace_id: root.workspaceId,
         surface_id: surfaceId,
       }).pipe(Effect.scoped);
 
@@ -123,6 +244,39 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
       }
 
       return yield* Effect.void;
+    });
+
+    const create = Effect.fn("CmuxPaneHost.create")(function* (
+      subagentId: SubagentId,
+      command: SubagentCommand,
+    ) {
+      return yield* layout.withPermit(
+        Effect.gen(function* () {
+          const panes = yield* listPanes(subagentId);
+          const liveSurfaceIds = new Set(panes.panes.flatMap((pane) => pane.surface_ids));
+
+          for (const surfaceId of subagentSurfaceIds) {
+            if (!liveSurfaceIds.has(surfaceId)) {
+              subagentSurfaceIds.delete(surfaceId);
+            }
+          }
+
+          const split = yield* selectPaneSplit(subagentId, panes);
+          const pane = yield* createPane(subagentId, command, split);
+          subagentSurfaceIds.add(pane.surface_id);
+
+          return pane;
+        }),
+      );
+    });
+
+    const close = Effect.fn("CmuxPaneHost.close")(function* (surfaceId: string) {
+      return yield* layout.withPermit(
+        Effect.gen(function* () {
+          yield* closeSurface(surfaceId);
+          subagentSurfaceIds.delete(surfaceId);
+        }),
+      );
     });
 
     const start = Effect.fn("SubagentHost.start")(
@@ -140,17 +294,15 @@ const make = (root: { readonly workspaceId: string; readonly surfaceId: string }
           ),
         );
 
-        yield* Effect.acquireRelease(
-          create(subagentId, command, root.workspaceId, root.surfaceId),
-          (pane) =>
-            close(root.workspaceId, pane.surface_id).pipe(
-              Effect.timeout(closeTimeout),
-              Effect.catch((error) =>
-                Effect.logWarning("Failed to close CMUX subagent pane", error).pipe(
-                  Effect.annotateLogs({ subagentId, host: "cmux-pane" }),
-                ),
+        yield* Effect.acquireRelease(create(subagentId, command), (pane) =>
+          close(pane.surface_id).pipe(
+            Effect.timeout(closeTimeout),
+            Effect.catch((error) =>
+              Effect.logWarning("Failed to close CMUX subagent pane", error).pipe(
+                Effect.annotateLogs({ subagentId, host: "cmux-pane" }),
               ),
             ),
+          ),
         );
 
         return yield* listener.accept;
