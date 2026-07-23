@@ -17,7 +17,6 @@ interface SubagentMessage {
 }
 
 export interface SubagentProcess {
-  readonly subagentId: SubagentId;
   readonly events: Stream.Stream<SubagentProcessEvent>;
   readonly await: Effect.Effect<SubagentProcessResult>;
   readonly ref: SubagentRef;
@@ -269,7 +268,6 @@ export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
   });
 
   return {
-    subagentId,
     events: Stream.fromQueue(events),
     await: Deferred.await(result),
     ref: { send },
