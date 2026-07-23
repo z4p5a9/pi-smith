@@ -1,4 +1,4 @@
-import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
@@ -7,24 +7,24 @@ import * as SubagentSupervisor from "./SubagentSupervisor.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
-export class SubagentUnknownError extends Schema.TaggedErrorClass<SubagentUnknownError>()(
-  "SubagentUnknownError",
+export class SubagentKillUnknownError extends Schema.TaggedErrorClass<SubagentKillUnknownError>()(
+  "SubagentKillUnknownError",
   {
     subagentId: SubagentId,
   },
 ) {}
 
-export class SubagentInactiveError extends Schema.TaggedErrorClass<SubagentInactiveError>()(
-  "SubagentInactiveError",
+export class SubagentKillInactiveError extends Schema.TaggedErrorClass<SubagentKillInactiveError>()(
+  "SubagentKillInactiveError",
   {
     subagentId: SubagentId,
   },
 ) {}
 
-export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
-  "@smith/subagent/SubagentCoordinator",
+export class RootSupervisor extends Context.Service<RootSupervisor>()(
+  "@smith/subagent/RootSupervisor",
   {
-    make: Effect.fn("SubagentCoordinator.make")(function* () {
+    make: Effect.fn("RootSupervisor.make")(function* () {
       const checkpoint = yield* SubagentCheckpoint;
       const supervisors = yield* SubagentSupervisorRegistry.make();
       const admissions = yield* Queue.unbounded<{
@@ -33,41 +33,42 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
         readonly ready: Deferred.Deferred<void>;
       }>();
 
-      yield* Effect.addFinalizer(() =>
-        Queue.shutdown(admissions).pipe(
-          Effect.andThen(
-            supervisors.values.pipe(
-              Effect.flatMap((current) =>
-                Effect.forEach(current, (supervisor) => supervisor.interrupt, {
-                  concurrency: "unbounded",
-                  discard: true,
-                }),
+      yield* Effect.acquireRelease(
+        Effect.forever(
+          Effect.gen(function* () {
+            const admission = yield* Queue.take(admissions);
+            const supervisor = yield* SubagentSupervisor.make(admission.subagentId, admission.spec);
+
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* supervisors.register(admission.subagentId, supervisor);
+                yield* supervisor.await.pipe(
+                  Effect.ensuring(supervisors.unregister(admission.subagentId, supervisor)),
+                  Effect.forkDetach({ startImmediately: true }),
+                );
+                yield* supervisor.start;
+                yield* Deferred.succeed(admission.ready, undefined);
+              }),
+            );
+          }),
+        ).pipe(Effect.forkDetach({ startImmediately: true })),
+        (admissionsFiber) =>
+          Queue.shutdown(admissions).pipe(
+            Effect.andThen(Fiber.interrupt(admissionsFiber)),
+            Effect.andThen(
+              supervisors.values.pipe(
+                Effect.flatMap((current) =>
+                  Effect.forEach(current, (supervisor) => supervisor.interrupt, {
+                    concurrency: "unbounded",
+                    discard: true,
+                  }),
+                ),
               ),
             ),
           ),
-        ),
       );
 
-      yield* Effect.forever(
-        Effect.gen(function* () {
-          const admission = yield* Queue.take(admissions);
-          const supervisor = yield* SubagentSupervisor.make(admission.subagentId, admission.spec);
-
-          yield* Effect.uninterruptible(
-            Effect.gen(function* () {
-              yield* supervisors.register(admission.subagentId, supervisor);
-              yield* supervisor.await.pipe(
-                Effect.ensuring(supervisors.unregister(admission.subagentId, supervisor)),
-                Effect.forkDetach({ startImmediately: true }),
-              );
-              yield* supervisor.start;
-              yield* Deferred.succeed(admission.ready, undefined);
-            }),
-          );
-        }),
-      ).pipe(Effect.forkScoped({ startImmediately: true }));
-
-      const create = Effect.fn("SubagentCoordinator.create")(function* (spec: SubagentSpec) {
+      const create = Effect.fn("RootSupervisor.create")(function* (spec: SubagentSpec) {
         const subagentId = yield* generateSubagentId(spec.title);
         const ready = yield* Deferred.make<void>();
 
@@ -78,30 +79,30 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
         return subagentId;
       });
 
-      const kill = Effect.fn("SubagentCoordinator.kill")(function* (subagentId: SubagentId) {
+      const kill = Effect.fn("RootSupervisor.kill")(function* (subagentId: SubagentId) {
         return yield* Effect.uninterruptible(
           Effect.gen(function* () {
             const supervisor = yield* supervisors.lookup(subagentId);
 
             if (supervisor === undefined) {
               if (!(yield* checkpoint.has(subagentId))) {
-                return yield* SubagentUnknownError.make({ subagentId });
+                return yield* SubagentKillUnknownError.make({ subagentId });
               }
 
-              return yield* SubagentInactiveError.make({ subagentId });
+              return yield* SubagentKillInactiveError.make({ subagentId });
             }
 
             yield* supervisor.interrupt;
             const result = yield* supervisor.await;
 
             if (result.kind !== "killed") {
-              return yield* SubagentInactiveError.make({ subagentId });
+              return yield* SubagentKillInactiveError.make({ subagentId });
             }
 
             return yield* checkpoint.update(subagentId, { status: "killed" });
           }).pipe(
             Effect.catchTag("SubagentNotFoundError", () =>
-              SubagentUnknownError.make({ subagentId }),
+              SubagentKillUnknownError.make({ subagentId }),
             ),
           ),
         );
@@ -114,9 +115,9 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
     }),
   },
 ) {
-  static readonly layerNoDeps = Layer.effect(SubagentCoordinator, SubagentCoordinator.make());
+  static readonly layerNoDeps = Layer.effect(RootSupervisor, RootSupervisor.make());
 
-  static readonly layer = SubagentCoordinator.layerNoDeps.pipe(
+  static readonly layer = RootSupervisor.layerNoDeps.pipe(
     Layer.provideMerge(SubagentCheckpoint.layer),
     Layer.provideMerge(SubagentEventOutbox.layer),
     Layer.provideMerge(SubagentRegistry.layer),

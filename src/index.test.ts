@@ -52,10 +52,141 @@ it.describe("root extension", () => {
     }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
 
-  it.effect("routes status and send validation and missing records through loaded tools", () => {
+  it.effect(
+    "routes status, send, and kill validation and missing records through loaded tools",
+    () => {
+      vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
+      vi.stubEnv("CMUX_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111");
+      vi.stubEnv("CMUX_SURFACE_ID", "22222222-2222-4222-8222-222222222222");
+
+      return Effect.gen(function* () {
+        const result = yield* Effect.promise(() =>
+          discoverAndLoadExtensions(
+            [fileURLToPath(new URL("./index.ts", import.meta.url))],
+            "/tmp/smith-extension-test",
+            "/tmp/smith-extension-test",
+          ),
+        );
+        const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+        const kill = yield* Effect.fromNullishOr(loaded.tools.get("subagent_kill"));
+        const send = yield* Effect.fromNullishOr(loaded.tools.get("subagent_send"));
+        const status = yield* Effect.fromNullishOr(loaded.tools.get("subagent_status"));
+        const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
+        const unusedContext: ExtensionContext = {
+          get ui(): ExtensionContext["ui"] {
+            throw new Error("Status tool accessed UI context");
+          },
+          mode: "print",
+          hasUI: false,
+          cwd: "/tmp/smith-extension-test",
+          get sessionManager(): ExtensionContext["sessionManager"] {
+            throw new Error("Status tool accessed the session manager");
+          },
+          get modelRegistry(): ExtensionContext["modelRegistry"] {
+            throw new Error("Status tool accessed the model registry");
+          },
+          model: undefined,
+          isIdle: () => true,
+          isProjectTrusted: () => true,
+          signal: undefined,
+          abort: () => undefined,
+          hasPendingMessages: () => false,
+          shutdown: () => undefined,
+          getContextUsage: () => undefined,
+          compact: () => undefined,
+          getSystemPrompt: () => "",
+        };
+
+        yield* Effect.gen(function* () {
+          const invalid = yield* Effect.promise(() =>
+            status.definition.execute(
+              "status-invalid",
+              { subagentId: "invalid" },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+          const unknown = yield* Effect.promise(() =>
+            status.definition.execute(
+              "status-unknown",
+              { subagentId: "sa_12345678_unknown" },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+          const invalidSend = yield* Effect.promise(() =>
+            send.definition.execute(
+              "send-invalid",
+              { subagentId: "invalid", message: "Hello." },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+          const unknownSend = yield* Effect.promise(() =>
+            send.definition.execute(
+              "send-unknown",
+              { subagentId: "sa_12345678_unknown", message: "Hello." },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+          const invalidKill = yield* Effect.promise(() =>
+            kill.definition.execute(
+              "kill-invalid",
+              { subagentId: "invalid" },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+          const unknownKill = yield* Effect.promise(() =>
+            kill.definition.execute(
+              "kill-unknown",
+              { subagentId: "sa_12345678_unknown" },
+              undefined,
+              undefined,
+              unusedContext,
+            ),
+          );
+
+          expect(invalid).toEqual({
+            content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
+            details: { subagentId: "invalid" },
+          });
+          expect(unknown).toEqual({
+            content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
+            details: { subagentId: "sa_12345678_unknown" },
+          });
+          expect(invalidSend).toEqual({
+            content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
+            details: { subagentId: "invalid" },
+          });
+          expect(unknownSend).toEqual({
+            content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
+            details: { subagentId: "sa_12345678_unknown" },
+          });
+          expect(invalidKill).toEqual({
+            content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
+            details: { subagentId: "invalid" },
+          });
+          expect(unknownKill).toEqual({
+            content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
+            details: { subagentId: "sa_12345678_unknown" },
+          });
+        }).pipe(Effect.ensuring(Effect.promise(() => shutdown())));
+      }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+    },
+  );
+
+  it.effect("routes create and kill through the loaded root supervisor", () => {
     vi.stubEnv("SMITH_SUBAGENT_ID", undefined);
     vi.stubEnv("CMUX_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111");
     vi.stubEnv("CMUX_SURFACE_ID", "22222222-2222-4222-8222-222222222222");
+    vi.stubEnv("PATH", "/tmp/smith-extension-test-no-bin");
 
     return Effect.gen(function* () {
       const result = yield* Effect.promise(() =>
@@ -66,21 +197,23 @@ it.describe("root extension", () => {
         ),
       );
       const loaded = yield* Effect.fromNullishOr(result.extensions[0]);
+      const create = yield* Effect.fromNullishOr(loaded.tools.get("subagent"));
+      const kill = yield* Effect.fromNullishOr(loaded.tools.get("subagent_kill"));
       const send = yield* Effect.fromNullishOr(loaded.tools.get("subagent_send"));
       const status = yield* Effect.fromNullishOr(loaded.tools.get("subagent_status"));
       const shutdown = yield* Effect.fromNullishOr(loaded.handlers.get("session_shutdown")?.[0]);
-      const unusedContext: ExtensionContext = {
+      const context: ExtensionContext = {
         get ui(): ExtensionContext["ui"] {
-          throw new Error("Status tool accessed UI context");
+          throw new Error("Lifecycle tools accessed UI context");
         },
         mode: "print",
         hasUI: false,
         cwd: "/tmp/smith-extension-test",
         get sessionManager(): ExtensionContext["sessionManager"] {
-          throw new Error("Status tool accessed the session manager");
+          throw new Error("Lifecycle tools accessed the session manager");
         },
         get modelRegistry(): ExtensionContext["modelRegistry"] {
-          throw new Error("Status tool accessed the model registry");
+          throw new Error("Lifecycle tools accessed the model registry");
         },
         model: undefined,
         isIdle: () => true,
@@ -95,58 +228,61 @@ it.describe("root extension", () => {
       };
 
       yield* Effect.gen(function* () {
-        const invalid = yield* Effect.promise(() =>
-          status.definition.execute(
-            "status-invalid",
-            { subagentId: "invalid" },
+        const created = yield* Effect.promise(() =>
+          create.definition.execute(
+            "create",
+            {
+              title: "Unavailable host",
+              prompt: "Wait for work.",
+              mode: "persistent",
+            },
             undefined,
             undefined,
-            unusedContext,
+            context,
           ),
         );
-        const unknown = yield* Effect.promise(() =>
-          status.definition.execute(
-            "status-unknown",
-            { subagentId: "sa_12345678_unknown" },
-            undefined,
-            undefined,
-            unusedContext,
+        const createdText = created.content[0];
+        const subagentId =
+          createdText?.type === "text"
+            ? createdText.text
+            : yield* Effect.die("Subagent tool did not return an ID");
+
+        expect(subagentId).toMatch(/^sa_[a-z0-9]{8}_unavailable-host$/);
+        expect(created.details).toEqual({ subagentId });
+
+        yield* Effect.suspend(() =>
+          Effect.promise(() =>
+            status.definition.execute("status", { subagentId }, undefined, undefined, context),
+          ).pipe(
+            Effect.flatMap((response) =>
+              response.content[0]?.type === "text" &&
+              response.content[0].text.includes('"status":"failed"')
+                ? Effect.succeed(response)
+                : Effect.fail("Subagent has not failed"),
+            ),
           ),
-        );
-        const invalidSend = yield* Effect.promise(() =>
+        ).pipe(Effect.eventually);
+
+        const inactiveSend = yield* Effect.promise(() =>
           send.definition.execute(
-            "send-invalid",
-            { subagentId: "invalid", message: "Hello." },
+            "send",
+            { subagentId, message: "Hello." },
             undefined,
             undefined,
-            unusedContext,
+            context,
           ),
         );
-        const unknownSend = yield* Effect.promise(() =>
-          send.definition.execute(
-            "send-unknown",
-            { subagentId: "sa_12345678_unknown", message: "Hello." },
-            undefined,
-            undefined,
-            unusedContext,
-          ),
+        const inactiveKill = yield* Effect.promise(() =>
+          kill.definition.execute("kill", { subagentId }, undefined, undefined, context),
         );
 
-        expect(invalid).toEqual({
-          content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
-          details: { subagentId: "invalid" },
+        expect(inactiveSend).toEqual({
+          content: [{ type: "text", text: `Subagent ${subagentId} is no longer active.` }],
+          details: { subagentId },
         });
-        expect(unknown).toEqual({
-          content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
-          details: { subagentId: "sa_12345678_unknown" },
-        });
-        expect(invalidSend).toEqual({
-          content: [{ type: "text", text: "Invalid subagent ID: invalid" }],
-          details: { subagentId: "invalid" },
-        });
-        expect(unknownSend).toEqual({
-          content: [{ type: "text", text: "Unknown subagent: sa_12345678_unknown" }],
-          details: { subagentId: "sa_12345678_unknown" },
+        expect(inactiveKill).toEqual({
+          content: [{ type: "text", text: `Subagent ${subagentId} is no longer active.` }],
+          details: { subagentId },
         });
       }).pipe(Effect.ensuring(Effect.promise(() => shutdown())));
     }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));

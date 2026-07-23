@@ -15,13 +15,9 @@ import { Type } from "typebox";
 import * as PiSubagentHarness from "./harness/pi/PiSubagentHarness.ts";
 import * as CmuxPaneHost from "./host/cmux/CmuxPaneHost.ts";
 import * as UnixSocketTransport from "./host/link/unix/UnixSocketTransport.ts";
+import { RootSupervisor } from "./subagent/RootSupervisor.ts";
 import { SubagentCapacity } from "./subagent/SubagentCapacity.ts";
 import { SubagentCheckpoint, SubagentRecord } from "./subagent/SubagentCheckpoint.ts";
-import {
-  SubagentCoordinator,
-  SubagentInactiveError,
-  SubagentUnknownError,
-} from "./subagent/SubagentCoordinator.ts";
 import { SubagentEventOutbox } from "./subagent/SubagentEventOutbox.ts";
 import { decodeSubagentId } from "./subagent/SubagentId.ts";
 import { SubagentRegistry } from "./subagent/SubagentRegistry.ts";
@@ -128,7 +124,7 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   const runtime = ManagedRuntime.make(
-    SubagentCoordinator.layer.pipe(
+    RootSupervisor.layer.pipe(
       Layer.provide(SubagentCapacity.layer(10)),
       Layer.provide(PiSubagentHarness.layer),
       Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
@@ -178,9 +174,9 @@ export default function extension(pi: ExtensionAPI): void {
     execute(toolCallId, { mode, prompt, title }, _signal, _onUpdate, ctx) {
       return runtime.runPromise(
         Effect.gen(function* () {
-          const coordinator = yield* SubagentCoordinator;
+          const rootSupervisor = yield* RootSupervisor;
           const spec = { title, prompt, cwd: ctx.cwd, mode: mode ?? ("ephemeral" as const) };
-          const subagentId = yield* coordinator.create(spec);
+          const subagentId = yield* rootSupervisor.create(spec);
 
           return {
             content: [{ type: "text" as const, text: subagentId }],
@@ -226,16 +222,29 @@ export default function extension(pi: ExtensionAPI): void {
 
           if (ref === undefined) {
             if (!(yield* checkpoint.has(id))) {
-              return yield* SubagentUnknownError.make({ subagentId: id });
+              return {
+                content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
+                details: { subagentId },
+              };
             }
 
-            return yield* SubagentInactiveError.make({ subagentId: id });
+            return {
+              content: [
+                { type: "text" as const, text: `Subagent ${subagentId} is no longer active.` },
+              ],
+              details: { subagentId },
+            };
           }
 
           const messageId = yield* ref.send(message);
 
           if (messageId === undefined) {
-            return yield* SubagentInactiveError.make({ subagentId: id });
+            return {
+              content: [
+                { type: "text" as const, text: `Subagent ${subagentId} is no longer active.` },
+              ],
+              details: { subagentId },
+            };
           }
 
           return {
@@ -252,18 +261,6 @@ export default function extension(pi: ExtensionAPI): void {
             SchemaError: () =>
               Effect.succeed({
                 content: [{ type: "text" as const, text: `Invalid subagent ID: ${subagentId}` }],
-                details: { subagentId },
-              }),
-            SubagentUnknownError: () =>
-              Effect.succeed({
-                content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
-                details: { subagentId },
-              }),
-            SubagentInactiveError: () =>
-              Effect.succeed({
-                content: [
-                  { type: "text" as const, text: `Subagent ${subagentId} is no longer active.` },
-                ],
                 details: { subagentId },
               }),
           }),
@@ -291,10 +288,10 @@ export default function extension(pi: ExtensionAPI): void {
     execute(toolCallId, { subagentId }) {
       return runtime.runPromise(
         Effect.gen(function* () {
-          const coordinator = yield* SubagentCoordinator;
+          const rootSupervisor = yield* RootSupervisor;
           const id = yield* decodeSubagentId(subagentId);
 
-          yield* coordinator.kill(id);
+          yield* rootSupervisor.kill(id);
 
           return {
             content: [{ type: "text" as const, text: `Killed subagent ${id}.` }],
@@ -307,12 +304,12 @@ export default function extension(pi: ExtensionAPI): void {
                 content: [{ type: "text" as const, text: `Invalid subagent ID: ${subagentId}` }],
                 details: { subagentId },
               }),
-            SubagentUnknownError: () =>
+            SubagentKillUnknownError: () =>
               Effect.succeed({
                 content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
                 details: { subagentId },
               }),
-            SubagentInactiveError: () =>
+            SubagentKillInactiveError: () =>
               Effect.succeed({
                 content: [
                   { type: "text" as const, text: `Subagent ${subagentId} is no longer active.` },
@@ -348,11 +345,15 @@ export default function extension(pi: ExtensionAPI): void {
           const id = yield* decodeSubagentId(subagentId);
           const record = yield* checkpoint
             .get(id)
-            .pipe(
-              Effect.catchTag("SubagentNotFoundError", () =>
-                SubagentUnknownError.make({ subagentId: id }),
-              ),
-            );
+            .pipe(Effect.catchTag("SubagentNotFoundError", () => Effect.void));
+
+          if (record === undefined) {
+            return {
+              content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
+              details: { subagentId },
+            };
+          }
+
           const text = yield* encodeSubagentRecord(record).pipe(Effect.orDie);
 
           return {
@@ -364,11 +365,6 @@ export default function extension(pi: ExtensionAPI): void {
             SchemaError: () =>
               Effect.succeed({
                 content: [{ type: "text" as const, text: `Invalid subagent ID: ${subagentId}` }],
-                details: { subagentId },
-              }),
-            SubagentUnknownError: () =>
-              Effect.succeed({
-                content: [{ type: "text" as const, text: `Unknown subagent: ${subagentId}` }],
                 details: { subagentId },
               }),
           }),
