@@ -129,9 +129,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   const runtime = ManagedRuntime.make(
     SubagentCoordinator.layer.pipe(
-      Layer.provideMerge(SubagentEventOutbox.layer),
       Layer.provide(SubagentCapacity.layer(10)),
-      Layer.provideMerge(SubagentCheckpoint.layer),
       Layer.provide(PiSubagentHarness.layer),
       Layer.provide(CmuxPaneHost.layer({ workspaceId, surfaceId })),
       Layer.provide(UnixSocketTransport.layer),

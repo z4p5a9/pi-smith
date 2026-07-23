@@ -1,6 +1,7 @@
 import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect";
 
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
+import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
 import { makeSubagentSupervisor, type SubagentSupervisor } from "./SubagentSupervisor.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
@@ -113,7 +114,11 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
     }),
   },
 ) {
-  static readonly layer = Layer.effect(SubagentCoordinator, SubagentCoordinator.make()).pipe(
+  static readonly layerNoDeps = Layer.effect(SubagentCoordinator, SubagentCoordinator.make());
+
+  static readonly layer = SubagentCoordinator.layerNoDeps.pipe(
+    Layer.provideMerge(SubagentCheckpoint.layer),
+    Layer.provideMerge(SubagentEventOutbox.layer),
     Layer.provideMerge(SubagentRegistry.layer),
   );
 }
@@ -164,4 +169,9 @@ class SubagentSupervisorRegistry extends Context.Service<SubagentSupervisorRegis
       return { register, unregister, lookup, values };
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(
+    SubagentSupervisorRegistry,
+    SubagentSupervisorRegistry.make(),
+  );
+}

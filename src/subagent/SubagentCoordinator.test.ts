@@ -99,9 +99,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -156,9 +157,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -212,9 +214,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -270,9 +273,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -334,9 +338,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -391,9 +396,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -462,9 +468,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -512,9 +519,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -579,9 +587,10 @@ it.describe("SubagentCoordinator", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          SubagentCoordinator.layer.pipe(
+          SubagentCoordinator.layerNoDeps.pipe(
             Layer.provideMerge(Layer.succeed(SubagentEventOutbox, observedEventOutbox)),
             Layer.provideMerge(SubagentCheckpoint.layer),
+            Layer.provideMerge(SubagentRegistry.layer),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
               Layer.succeed(
@@ -651,9 +660,10 @@ it.describe("SubagentCoordinator", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          SubagentCoordinator.layer.pipe(
+          SubagentCoordinator.layerNoDeps.pipe(
             Layer.provideMerge(Layer.succeed(SubagentEventOutbox, blockedEventOutbox)),
             Layer.provideMerge(SubagentCheckpoint.layer),
+            Layer.provideMerge(SubagentRegistry.layer),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
               Layer.succeed(
@@ -717,9 +727,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -881,9 +892,10 @@ it.describe("SubagentCoordinator", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          SubagentCoordinator.layer.pipe(
+          SubagentCoordinator.layerNoDeps.pipe(
             Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
+            Layer.provideMerge(SubagentRegistry.layer),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
               Layer.succeed(
@@ -959,9 +971,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -1042,9 +1055,10 @@ it.describe("SubagentCoordinator", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          SubagentCoordinator.layer.pipe(
+          SubagentCoordinator.layerNoDeps.pipe(
             Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, controlledCheckpoint)),
+            Layer.provideMerge(SubagentRegistry.layer),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
               Layer.succeed(
@@ -1073,9 +1087,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -1130,9 +1145,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -1206,9 +1222,10 @@ it.describe("SubagentCoordinator", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(
-          SubagentCoordinator.layer.pipe(
+          SubagentCoordinator.layerNoDeps.pipe(
             Layer.provideMerge(SubagentEventOutbox.layer),
             Layer.provide(Layer.succeed(SubagentCheckpoint, observedCheckpoint)),
+            Layer.provideMerge(SubagentRegistry.layer),
             Layer.provideMerge(TestHost.layer),
             Layer.provide(
               Layer.succeed(
@@ -1272,9 +1289,10 @@ it.describe("SubagentCoordinator", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        SubagentCoordinator.layer.pipe(
+        SubagentCoordinator.layerNoDeps.pipe(
           Layer.provideMerge(SubagentEventOutbox.layer),
           Layer.provideMerge(SubagentCheckpoint.layer),
+          Layer.provideMerge(SubagentRegistry.layer),
           Layer.provideMerge(TestHost.layer),
           Layer.provide(
             Layer.succeed(
@@ -1313,7 +1331,10 @@ it.describe("SubagentCoordinator", () => {
           return admittedSubagentId;
         }).pipe(
           Effect.provide(
-            SubagentCoordinator.layer.pipe(Layer.provideMerge(SubagentEventOutbox.layer)),
+            SubagentCoordinator.layerNoDeps.pipe(
+              Layer.provideMerge(SubagentEventOutbox.layer),
+              Layer.provideMerge(SubagentRegistry.layer),
+            ),
           ),
         ),
       );
@@ -1344,9 +1365,10 @@ it.describe("SubagentCoordinator", () => {
 
   it.effect("releases live children when its ManagedRuntime is disposed", () => {
     const runtime = ManagedRuntime.make(
-      SubagentCoordinator.layer.pipe(
+      SubagentCoordinator.layerNoDeps.pipe(
         Layer.provideMerge(SubagentEventOutbox.layer),
         Layer.provideMerge(SubagentCheckpoint.layer),
+        Layer.provideMerge(SubagentRegistry.layer),
         Layer.provideMerge(TestHost.layer),
         Layer.provide(
           Layer.succeed(

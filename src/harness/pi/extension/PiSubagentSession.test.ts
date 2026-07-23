@@ -15,7 +15,7 @@ it.effect("constructs without connecting the link", () =>
 
     yield* Effect.void.pipe(
       Effect.provide(
-        PiSubagentSession.layer(subagentId).pipe(
+        PiSubagentSession.layerNoDeps(subagentId).pipe(
           Layer.provideMerge(UnixSocketTransport.layer),
           Layer.provide(NodeFileSystem.layer),
         ),
@@ -51,7 +51,7 @@ it.effect("starts one connection across concurrent calls", () =>
       expect(connectCount).toBe(1);
     }).pipe(
       Effect.provide(
-        PiSubagentSession.layer(subagentId).pipe(
+        PiSubagentSession.layerNoDeps(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,
@@ -102,7 +102,7 @@ it.effect("retries start after connection failure", () =>
       expect(connectCount).toBe(2);
     }).pipe(
       Effect.provide(
-        PiSubagentSession.layer(subagentId).pipe(
+        PiSubagentSession.layerNoDeps(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,
@@ -177,7 +177,7 @@ it.effect("publishes the session when start is interrupted after root acceptance
       expect(connectCount).toBe(1);
     }).pipe(
       Effect.provide(
-        PiSubagentSession.layer(subagentId).pipe(
+        PiSubagentSession.layerNoDeps(subagentId).pipe(
           Layer.provide(
             Layer.succeed(
               SubagentLinkTransport,

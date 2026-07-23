@@ -2,7 +2,6 @@ import { NodeFileSystem } from "@effect/platform-node";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Config, ConfigProvider, Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
 
-import * as UnixSocketTransport from "../../../host/link/unix/UnixSocketTransport.ts";
 import { SubagentId } from "../../../subagent/SubagentId.ts";
 import { PiSubagentSession } from "./PiSubagentSession.ts";
 
@@ -17,10 +16,7 @@ export default function extension(pi: ExtensionAPI): void {
   );
 
   const runtime = ManagedRuntime.make(
-    PiSubagentSession.layer(subagentId).pipe(
-      Layer.provide(UnixSocketTransport.layer),
-      Layer.provide(NodeFileSystem.layer),
-    ),
+    PiSubagentSession.layer(subagentId).pipe(Layer.provide(NodeFileSystem.layer)),
   );
   const commands = Effect.runSync(Queue.unbounded<string>());
   const ready = Effect.runSync(Queue.unbounded<void>());
