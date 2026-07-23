@@ -8,7 +8,7 @@ import {
 } from "../Transport.ts";
 import type { SubagentId } from "../../../subagent/SubagentId.ts";
 
-const make = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const uid = yield* Effect.sync(() => process.getuid?.());
   const runtimeDirectory = `/tmp/smith-${uid ?? "unsupported"}`;
@@ -106,6 +106,6 @@ const make = Effect.gen(function* () {
   });
 
   return { listen, connect };
-});
+}).pipe(Effect.withSpan("UnixSocketTransport.make"));
 
 export const layer = Layer.effect(SubagentLinkTransport, make);

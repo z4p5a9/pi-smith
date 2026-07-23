@@ -131,7 +131,7 @@ export class TestHost extends Context.Service<TestHost>()("@smith/testing/TestHo
       takeStart: Queue.take(starts),
       verify,
     };
-  }),
+  }).pipe(Effect.withSpan("TestHost.make")),
 }) {
   static readonly layerNoDeps = Layer.effect(TestHost, TestHost.make);
 

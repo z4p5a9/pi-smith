@@ -13,7 +13,7 @@ import type { SubagentEventEnvelope } from "./SubagentEvent.ts";
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
-import { makeSubagentSupervisor } from "./SubagentSupervisor.ts";
+import * as SubagentSupervisor from "./SubagentSupervisor.ts";
 
 it.describe("SubagentSupervisor", () => {
   it.effect("registers before start returns and publishes the final event before teardown", () =>
@@ -48,7 +48,7 @@ it.describe("SubagentSupervisor", () => {
           mode: "ephemeral",
         });
 
-        const supervisor = yield* makeSubagentSupervisor(subagentId, {
+        const supervisor = yield* SubagentSupervisor.make(subagentId, {
           title: "Review API",
           prompt: "Complete the task.",
           cwd: "/worktree",
@@ -132,7 +132,7 @@ it.describe("SubagentSupervisor", () => {
         mode: "ephemeral",
       });
 
-      const supervisor = yield* makeSubagentSupervisor(subagentId, {
+      const supervisor = yield* SubagentSupervisor.make(subagentId, {
         title: "Host failure",
         prompt: "Complete the task.",
         cwd: "/worktree",
@@ -197,7 +197,7 @@ it.describe("SubagentSupervisor", () => {
         mode: "persistent",
       });
 
-      const supervisor = yield* makeSubagentSupervisor(subagentId, {
+      const supervisor = yield* SubagentSupervisor.make(subagentId, {
         title: "Interrupted",
         prompt: "Complete the task.",
         cwd: "/worktree",

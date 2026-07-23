@@ -95,7 +95,7 @@ export class SubagentCheckpoint extends Context.Service<SubagentCheckpoint>()(
         );
 
       return { put, update, get, has, changes };
-    }),
+    }).pipe(Effect.withSpan("SubagentCheckpoint.make")),
   },
 ) {
   static readonly layer = Layer.effect(SubagentCheckpoint, SubagentCheckpoint.make);

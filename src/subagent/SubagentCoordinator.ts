@@ -3,7 +3,7 @@ import { Context, Deferred, Effect, Layer, Queue, Ref, Schema } from "effect";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import { generateSubagentId, SubagentId } from "./SubagentId.ts";
-import { makeSubagentSupervisor, type SubagentSupervisor } from "./SubagentSupervisor.ts";
+import * as SubagentSupervisor from "./SubagentSupervisor.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
 
@@ -51,7 +51,7 @@ export class SubagentCoordinator extends Context.Service<SubagentCoordinator>()(
       yield* Effect.forever(
         Effect.gen(function* () {
           const admission = yield* Queue.take(admissions);
-          const supervisor = yield* makeSubagentSupervisor(admission.subagentId, admission.spec);
+          const supervisor = yield* SubagentSupervisor.make(admission.subagentId, admission.spec);
 
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
@@ -127,11 +127,13 @@ class SubagentSupervisorRegistry extends Context.Service<SubagentSupervisorRegis
   "@smith/subagent/SubagentSupervisorRegistry",
   {
     make: Effect.fn("SubagentSupervisorRegistry.make")(function* () {
-      const supervisors = yield* Ref.make(new Map<SubagentId, SubagentSupervisor>());
+      const supervisors = yield* Ref.make(
+        new Map<SubagentId, SubagentSupervisor.SubagentSupervisor>(),
+      );
 
       const register = Effect.fn("SubagentSupervisorRegistry.register")(function* (
         subagentId: SubagentId,
-        supervisor: SubagentSupervisor,
+        supervisor: SubagentSupervisor.SubagentSupervisor,
       ) {
         yield* Ref.update(supervisors, (prev) => {
           const next = new Map(prev);
@@ -142,7 +144,7 @@ class SubagentSupervisorRegistry extends Context.Service<SubagentSupervisorRegis
 
       const unregister = Effect.fn("SubagentSupervisorRegistry.unregister")(function* (
         subagentId: SubagentId,
-        supervisor: SubagentSupervisor,
+        supervisor: SubagentSupervisor.SubagentSupervisor,
       ) {
         yield* Ref.update(supervisors, (prev) => {
           if (prev.get(subagentId) !== supervisor) {

@@ -93,7 +93,7 @@ export class TestChildProcessSpawner extends Context.Service<TestChildProcessSpa
       });
 
       return { ...ChildProcessSpawner.make(spawn), stub, calls, verify };
-    }),
+    }).pipe(Effect.withSpan("TestChildProcessSpawner.make")),
   },
 ) {
   static readonly layer = Layer.effect(

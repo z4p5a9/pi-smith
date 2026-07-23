@@ -23,7 +23,7 @@ export interface SubagentProcess {
   readonly run: Effect.Effect<void>;
 }
 
-export const makeSubagentProcess = Effect.fn("SubagentProcess.make")(function* (
+export const make = Effect.fn("SubagentProcess.make")(function* (
   subagentId: SubagentId,
   spec: SubagentSpec,
 ) {

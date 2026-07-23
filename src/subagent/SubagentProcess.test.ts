@@ -10,7 +10,7 @@ import { SubagentHost, SubagentHostStartError } from "../host/Host.ts";
 import { SubagentCapacity } from "./SubagentCapacity.ts";
 import { SubagentCheckpoint } from "./SubagentCheckpoint.ts";
 import { decodeSubagentId } from "./SubagentId.ts";
-import { makeSubagentProcess } from "./SubagentProcess.ts";
+import * as SubagentProcess from "./SubagentProcess.ts";
 
 it.describe("SubagentProcess", () => {
   it.effect("accepts the first message, emits it, and resolves exited", () =>
@@ -29,7 +29,7 @@ it.describe("SubagentProcess", () => {
         mode: "ephemeral",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Review API",
         prompt: "Complete the task.",
         cwd: "/worktree",
@@ -95,7 +95,7 @@ it.describe("SubagentProcess", () => {
         mode: "persistent",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Assistant",
         prompt: "Stand by.",
         cwd: "/worktree",
@@ -187,7 +187,7 @@ it.describe("SubagentProcess", () => {
           mode: "persistent",
         });
 
-        const process = yield* makeSubagentProcess(subagentId, {
+        const process = yield* SubagentProcess.make(subagentId, {
           title: "Assistant",
           prompt: "Stand by.",
           cwd: "/worktree",
@@ -341,7 +341,7 @@ it.describe("SubagentProcess", () => {
         mode: "persistent",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Assistant",
         prompt: "Stand by.",
         cwd: "/worktree",
@@ -406,7 +406,7 @@ it.describe("SubagentProcess", () => {
         mode: "ephemeral",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Interrupted",
         prompt: "Complete the task.",
         cwd: "/worktree",
@@ -465,7 +465,7 @@ it.describe("SubagentProcess", () => {
         mode: "ephemeral",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Host failure",
         prompt: "Complete the task.",
         cwd: "/worktree",
@@ -525,7 +525,7 @@ it.describe("SubagentProcess", () => {
         mode: "ephemeral",
       });
 
-      const process = yield* makeSubagentProcess(subagentId, {
+      const process = yield* SubagentProcess.make(subagentId, {
         title: "Disconnect",
         prompt: "Complete the task.",
         cwd: "/worktree",

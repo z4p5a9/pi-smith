@@ -2,7 +2,7 @@ import { Deferred, Effect, Fiber, Stream } from "effect";
 
 import { SubagentEventOutbox } from "./SubagentEventOutbox.ts";
 import type { SubagentId } from "./SubagentId.ts";
-import { makeSubagentProcess } from "./SubagentProcess.ts";
+import * as SubagentProcess from "./SubagentProcess.ts";
 import type { SubagentProcessResult } from "./SubagentProcessResult.ts";
 import { SubagentRegistry } from "./SubagentRegistry.ts";
 import type { SubagentSpec } from "./SubagentSpec.ts";
@@ -13,13 +13,13 @@ export interface SubagentSupervisor {
   readonly await: Effect.Effect<SubagentProcessResult>;
 }
 
-export const makeSubagentSupervisor = Effect.fn("SubagentSupervisor.make")(function* (
+export const make = Effect.fn("SubagentSupervisor.make")(function* (
   subagentId: SubagentId,
   spec: SubagentSpec,
 ) {
   const eventOutbox = yield* SubagentEventOutbox;
   const registry = yield* SubagentRegistry;
-  const process = yield* makeSubagentProcess(subagentId, spec);
+  const process = yield* SubagentProcess.make(subagentId, spec);
   const started = yield* Deferred.make<void>();
   const runtime = yield* Deferred.make<Fiber.Fiber<void>>();
   const result = yield* Deferred.make<SubagentProcessResult>();
